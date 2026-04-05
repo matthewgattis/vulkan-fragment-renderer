@@ -5,12 +5,13 @@ A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support.
 ## Features
 
 - **Vulkan rendering** with VMA for memory management
-- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. Left eye mirrored to desktop window via blit (aspect-preserving fill). Enabled by default when a headset is available; disable with `--no-xr`
+- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. XR rig is a child of the camera (full transform). Left eye mirrored to desktop window via blit (aspect-preserving fill) with ImGui overlay. Falls back to desktop rendering when HMD is idle/not worn. WASD moves in HMD space when headset is active. Enabled by default when a headset is available; disable with `--no-xr`
 - **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
 - **Hot-reload** — press `R` to recompile and reload the shader from disk
 - **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry
-- **Quaternion camera** — gimbal-lock-free orbit and free-look modes with physics-based movement
-- **Dear ImGui overlay** — FPS, camera info, and controls reference
+- **Quaternion camera** — gimbal-lock-free orbit and free-look modes with acceleration/friction physics, pivot-distance-scaled movement
+- **Mouse capture** — click viewport to capture, Escape to release. Camera controls require capture when UI is visible
+- **Dear ImGui overlay** — FPS, camera info, capture state, and controls reference (auto-resizing)
 - **Two-set descriptor layout** — set 0 (common frame data) for all shaders, set 1 (precomputed inverse matrices) for ray marching
 - **Push constants** — reserved for per-object model matrix (identity for fullscreen shaders)
 
@@ -45,15 +46,17 @@ cmake --build build
 | Middle-click drag | Pan |
 | Both buttons drag | Zoom (forward/back) |
 | Scroll wheel | Zoom |
-| WASD | Move (view-relative) |
+| Ctrl + both buttons | Adjust pivot distance (mouse) |
+| Ctrl + scroll | Adjust pivot distance (scroll) |
+| WASD | Move (camera-relative, or HMD-relative in VR) |
 | Space / Shift | Up / Down |
 | R | Reload shader |
-| Q | Unload shader |
+| Q | Unload shader (also releases mouse) |
 | T | Reset time |
 | C | Reset camera |
 | G | Toggle UI |
 | F / F11 | Toggle fullscreen |
-| Escape | Quit |
+| Escape | Release mouse (or quit if not captured) |
 
 ## Writing Shaders
 
