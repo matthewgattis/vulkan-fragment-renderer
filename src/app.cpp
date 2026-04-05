@@ -28,7 +28,7 @@ static ExternalVulkanRequirements build_xr_requirements(bool xr_enabled) {
 }
 
 App::App(const std::filesystem::path& shader_path, bool high_dpi, bool xr_enabled)
-    : window_("vulkan-fragment-renderer", 1280, 720, high_dpi)
+    : window_("vulkan-fragment-renderer", high_dpi)
     , engine_(window_, [&]() -> const ExternalVulkanRequirements* {
         static auto ext_reqs = build_xr_requirements(xr_enabled);
         if (ext_reqs.instance_extensions.empty() && ext_reqs.device_extensions.empty()

@@ -3,15 +3,48 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <SDL3/SDL_vulkan.h>
+#include <array>
 #include <stdexcept>
 
 static auto logger = spdlog::stdout_color_mt("window");
 
 namespace vfr {
 
-Window::Window(const std::string& title, int width, int height, bool high_dpi) {
+Window::Window(const std::string& title, bool high_dpi) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
+    }
+
+    // Pick the largest 4:3 resolution that fits the primary display's usable area
+    struct Resolution { int w, h; };
+    constexpr std::array<Resolution, 9> candidates = {{
+        {3200, 2400}, {2560, 1920}, {2048, 1536}, {1600, 1200}, {1440, 1080},
+        {1280, 960}, {1024, 768}, {800, 600}, {640, 480},
+    }};
+
+    int width = 1280;
+    int height = 960;
+
+    SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    SDL_Rect usable;
+    if (primary && SDL_GetDisplayUsableBounds(primary, &usable)) {
+        bool found = false;
+        for (const auto& res : candidates) {
+            if (res.w < usable.w && res.h < usable.h) {
+                width = res.w;
+                height = res.h;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            width = candidates.back().w;
+            height = candidates.back().h;
+        }
+        logger->info("display usable area: {}x{}, selected window size: {}x{}",
+                     usable.w, usable.h, width, height);
+    } else {
+        logger->warn("could not query display, using fallback size: {}x{}", width, height);
     }
 
     SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;

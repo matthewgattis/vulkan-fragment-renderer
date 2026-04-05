@@ -4,7 +4,8 @@ A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support.
 
 ## Features
 
-- **Vulkan rendering** with VMA for memory management
+- **Vulkan rendering** with VMA for memory management, sRGB swapchain (hardware gamma correction)
+- **Automatic window sizing** — selects the largest 4:3 resolution that fits the display's usable area
 - **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. XR rig is a child of the camera (full transform). Left eye mirrored to desktop window via blit (aspect-preserving fill) with ImGui overlay. Falls back to desktop rendering when HMD is idle/not worn. WASD moves in HMD space when headset is active. Enabled by default when a headset is available; disable with `--no-xr`
 - **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
 - **Hot-reload** — press `R` to recompile and reload the shader from disk
