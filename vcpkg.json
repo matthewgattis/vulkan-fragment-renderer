@@ -1,0 +1,20 @@
+{
+  "name": "vulkan-fragment-renderer",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "vulkan",
+    "vulkan-memory-allocator",
+    "glm",
+    {
+      "name": "sdl3",
+      "features": ["vulkan"]
+    },
+    "spdlog",
+    "shaderc",
+    {
+      "name": "imgui",
+      "features": ["sdl3-binding", "vulkan-binding"]
+    },
+    "argparse"
+  ]
+}
