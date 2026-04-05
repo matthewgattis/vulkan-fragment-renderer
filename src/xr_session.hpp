@@ -84,7 +84,8 @@ private:
         std::vector<vk::raii::ImageView> depth_views;
         uint32_t depth_index = 0;
 
-        std::vector<vk::raii::Framebuffer> framebuffers;
+        std::vector<vk::raii::Framebuffer> framebuffers;  // color_count * depth_count
+        uint32_t depth_count = 0;
     };
     std::array<EyeSwapchain, 2> eyes_;
     vk::Extent2D eye_extent_{};

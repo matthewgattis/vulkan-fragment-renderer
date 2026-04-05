@@ -405,22 +405,24 @@ void XrSession::create_swapchains() {
             eyes_[eye].depth_views.emplace_back(*raii_device_, view_ci);
         }
 
-        // Create framebuffers (one per color/depth swapchain image pair)
-        // Color and depth swapchain image counts should match
-        for (uint32_t i = 0; i < color_count; ++i) {
-            std::array<vk::ImageView, 2> attachments = {
-                *eyes_[eye].color_views[i],
-                *eyes_[eye].depth_views[i % depth_count]};
+        // Pre-build framebuffers for all color × depth index combinations
+        eyes_[eye].depth_count = depth_count;
+        for (uint32_t ci = 0; ci < color_count; ++ci) {
+            for (uint32_t di = 0; di < depth_count; ++di) {
+                std::array<vk::ImageView, 2> attachments = {
+                    *eyes_[eye].color_views[ci],
+                    *eyes_[eye].depth_views[di]};
 
-            vk::FramebufferCreateInfo fb_ci{};
-            fb_ci.renderPass = *render_pass_;
-            fb_ci.attachmentCount = static_cast<uint32_t>(attachments.size());
-            fb_ci.pAttachments = attachments.data();
-            fb_ci.width = eye_extent_.width;
-            fb_ci.height = eye_extent_.height;
-            fb_ci.layers = 1;
+                vk::FramebufferCreateInfo fb_ci{};
+                fb_ci.renderPass = *render_pass_;
+                fb_ci.attachmentCount = static_cast<uint32_t>(attachments.size());
+                fb_ci.pAttachments = attachments.data();
+                fb_ci.width = eye_extent_.width;
+                fb_ci.height = eye_extent_.height;
+                fb_ci.layers = 1;
 
-            eyes_[eye].framebuffers.emplace_back(*raii_device_, fb_ci);
+                eyes_[eye].framebuffers.emplace_back(*raii_device_, fb_ci);
+            }
         }
     }
 }
@@ -526,9 +528,7 @@ void XrSession::begin_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
     XR_CHECK(xrWaitSwapchainImage(sc.depth_handle, &wait_info),
              "xrWaitSwapchainImage (depth) failed");
 
-    // Build framebuffer from current color + depth indices
-    // We pre-built framebuffers assuming matching indices; if they differ, rebuild on the fly
-    vk::raii::Framebuffer* fb = &sc.framebuffers[sc.color_index];
+    uint32_t fb_index = sc.color_index * sc.depth_count + sc.depth_index;
 
     // Begin render pass
     std::array<vk::ClearValue, 2> clear_values;
@@ -537,7 +537,7 @@ void XrSession::begin_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
 
     vk::RenderPassBeginInfo rp_info{};
     rp_info.renderPass = *render_pass_;
-    rp_info.framebuffer = **fb;
+    rp_info.framebuffer = *sc.framebuffers[fb_index];
     rp_info.renderArea = vk::Rect2D{{0, 0}, eye_extent_};
     rp_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
     rp_info.pClearValues = clear_values.data();
