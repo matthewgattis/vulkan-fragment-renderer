@@ -19,6 +19,11 @@ int main(int argc, char* argv[]) {
         .implicit_value(true)
         .help("disable high-DPI scaling");
 
+    program.add_argument("--no-xr")
+        .default_value(false)
+        .implicit_value(true)
+        .help("disable OpenXR HMD support");
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& e) {
@@ -30,7 +35,8 @@ int main(int argc, char* argv[]) {
     try {
         vfr::App app(
             program.get<std::string>("shader"),
-            !program.get<bool>("--low-dpi"));
+            !program.get<bool>("--low-dpi"),
+            !program.get<bool>("--no-xr"));
         app.run();
     } catch (const std::exception& e) {
         spdlog::critical("fatal: {}", e.what());

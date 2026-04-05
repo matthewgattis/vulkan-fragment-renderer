@@ -11,7 +11,7 @@ void main() {
     gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
 
     // Output normalized coordinates for the fragment shader.
-    // FragCoord ranges from (-1,-1) at bottom-left to (1,1) at top-right.
-    // Negate Y to correct for Vulkan's downward-pointing NDC Y axis.
-    FragCoord = (pos * 2.0 - 1.0) * vec2(1.0, -1.0);
+    // FragCoord ranges from (-1,-1) to (1,1) in Vulkan NDC.
+    // The projection matrix handles Y-flip via negated [1][1].
+    FragCoord = pos * 2.0 - 1.0;
 }

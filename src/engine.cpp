@@ -9,13 +9,13 @@ static auto logger = spdlog::stdout_color_mt("engine");
 
 namespace vfr {
 
-Engine::Engine(Window& window) : window_(window) {
-    create_instance();
+Engine::Engine(Window& window, const ExternalVulkanRequirements* ext_reqs) : window_(window) {
+    create_instance(ext_reqs);
 
     VkSurfaceKHR raw_surface = window_.create_surface(*instance_);
     surface_ = vk::raii::SurfaceKHR(instance_, raw_surface);
 
-    create_device();
+    create_device(ext_reqs);
     create_allocator();
     create_swapchain();
     create_render_pass();
@@ -43,7 +43,7 @@ Engine::~Engine() {
     }
 }
 
-void Engine::create_instance() {
+void Engine::create_instance(const ExternalVulkanRequirements* ext_reqs) {
     vk::ApplicationInfo app_info{
         "vulkan-fragment-renderer", VK_MAKE_VERSION(0, 1, 0),
         "vfr", VK_MAKE_VERSION(0, 1, 0),
@@ -56,6 +56,17 @@ void Engine::create_instance() {
 #ifdef __APPLE__
     sdl_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
+
+    // Merge external instance extensions (e.g. from OpenXR)
+    std::vector<std::string> ext_storage;
+    if (ext_reqs) {
+        for (auto& ext : ext_reqs->instance_extensions) {
+            ext_storage.push_back(ext);
+        }
+        for (auto& ext : ext_storage) {
+            sdl_exts.push_back(ext.c_str());
+        }
+    }
 
     vk::InstanceCreateInfo create_info{};
     create_info.pApplicationInfo = &app_info;
@@ -83,23 +94,42 @@ void Engine::create_instance() {
     instance_ = vk::raii::Instance(context_, create_info);
 }
 
-void Engine::create_device() {
+void Engine::create_device(const ExternalVulkanRequirements* ext_reqs) {
+    // If XR specifies a physical device query, use it; otherwise auto-select
+    VkPhysicalDevice required_pd = VK_NULL_HANDLE;
+    if (ext_reqs && ext_reqs->physical_device_query) {
+        required_pd = ext_reqs->physical_device_query(static_cast<VkInstance>(*instance_));
+    }
+
     auto physical_devices = instance_.enumeratePhysicalDevices();
     if (physical_devices.empty()) {
         throw std::runtime_error("no Vulkan-capable GPU found");
     }
 
-    // Pick first discrete GPU, or fall back to first device
-    size_t chosen = 0;
-    for (size_t i = 0; i < physical_devices.size(); ++i) {
-        if (physical_devices[i].getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
-            chosen = i;
-            break;
+    if (required_pd != VK_NULL_HANDLE) {
+        // Use the XR-specified physical device
+        bool found = false;
+        for (auto& pd : physical_devices) {
+            if (static_cast<VkPhysicalDevice>(*pd) == required_pd) {
+                physical_device_ = std::move(pd);
+                found = true;
+                break;
+            }
         }
+        if (!found) throw std::runtime_error("XR-required physical device not found");
+    } else {
+        // Pick first discrete GPU, or fall back to first device
+        size_t chosen = 0;
+        for (size_t i = 0; i < physical_devices.size(); ++i) {
+            if (physical_devices[i].getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                chosen = i;
+                break;
+            }
+        }
+        physical_device_ = std::move(physical_devices[chosen]);
     }
-    physical_device_ = std::move(physical_devices[chosen]);
 
-    logger->info("using GPU: {}", std::string(physical_device_.getProperties().deviceName));
+    logger->info("using GPU: {}", physical_device_.getProperties().deviceName.data());
 
     // Find graphics queue family
     auto families = physical_device_.getQueueFamilyProperties();
@@ -120,6 +150,17 @@ void Engine::create_device() {
         "VK_KHR_portability_subset",
 #endif
     };
+
+    // Merge external device extensions (e.g. from OpenXR)
+    std::vector<std::string> ext_storage;
+    if (ext_reqs) {
+        for (auto& ext : ext_reqs->device_extensions) {
+            ext_storage.push_back(ext);
+        }
+        for (auto& ext : ext_storage) {
+            device_extensions.push_back(ext.c_str());
+        }
+    }
 
     vk::PhysicalDeviceFeatures features{};
 
@@ -305,6 +346,17 @@ void Engine::create_render_pass() {
     rp_info.pDependencies = &dependency;
 
     render_pass_ = vk::raii::RenderPass(device_, rp_info);
+
+    // Overlay render pass — same attachments but loads color (no clear).
+    // Used to composite ImGui on top of blitted content.
+    color_attachment.loadOp = vk::AttachmentLoadOp::eLoad;
+    color_attachment.initialLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    depth_attachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+    depth_attachment.initialLayout = vk::ImageLayout::eUndefined;
+
+    std::array overlay_attachments = {color_attachment, depth_attachment};
+    rp_info.pAttachments = overlay_attachments.data();
+    overlay_pass_ = vk::raii::RenderPass(device_, rp_info);
 }
 
 void Engine::create_framebuffers() {
@@ -440,6 +492,133 @@ void Engine::end_frame() {
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
         recreate_swapchain();
     }
+
+    frame_index_ = (frame_index_ + 1) % MAX_FRAMES_IN_FLIGHT;
+    ++frame_counter_;
+}
+
+// ── Decomposed frame lifecycle for XR mode ──────────────────
+
+vk::CommandBuffer Engine::begin_command_buffer() {
+    auto& frame = frames_[frame_index_];
+
+    auto wait_result = device_.waitForFences({*frame.in_flight}, VK_TRUE, UINT64_MAX);
+    (void)wait_result;
+
+    // Flush old deferred destroys
+    std::erase_if(deferred_, [this](auto& d) {
+        if (d.deadline <= frame_counter_) { d.destroy(); return true; }
+        return false;
+    });
+
+    device_.resetFences({*frame.in_flight});
+    frame.command_buffer.reset();
+    frame.command_buffer.begin(vk::CommandBufferBeginInfo{});
+
+    return *frame.command_buffer;
+}
+
+bool Engine::acquire_desktop_image() {
+    current_acquire_sem_ = *acquire_semaphores_[semaphore_index_];
+    current_render_sem_ = *render_semaphores_[semaphore_index_];
+    semaphore_index_ = (semaphore_index_ + 1) % static_cast<uint32_t>(acquire_semaphores_.size());
+
+    auto [result, idx] = swapchain_.acquireNextImage(UINT64_MAX, current_acquire_sem_);
+    if (result == vk::Result::eErrorOutOfDateKHR) {
+        recreate_swapchain();
+        return false;
+    }
+    image_index_ = idx;
+    return true;
+}
+
+void Engine::begin_desktop_render_pass(vk::CommandBuffer cmd) {
+    std::array<vk::ClearValue, 2> clear_values;
+    clear_values[0].color = vk::ClearColorValue{std::array{0.0f, 0.0f, 0.0f, 1.0f}};
+    clear_values[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
+
+    vk::RenderPassBeginInfo rp_begin{};
+    rp_begin.renderPass = *render_pass_;
+    rp_begin.framebuffer = *framebuffers_[image_index_];
+    rp_begin.renderArea = vk::Rect2D{{0, 0}, swapchain_extent_};
+    rp_begin.clearValueCount = static_cast<uint32_t>(clear_values.size());
+    rp_begin.pClearValues = clear_values.data();
+
+    cmd.beginRenderPass(rp_begin, vk::SubpassContents::eInline);
+
+    vk::Viewport viewport{0, 0,
+        static_cast<float>(swapchain_extent_.width),
+        static_cast<float>(swapchain_extent_.height),
+        0.0f, 1.0f};
+    cmd.setViewport(0, viewport);
+
+    vk::Rect2D scissor{{0, 0}, swapchain_extent_};
+    cmd.setScissor(0, scissor);
+}
+
+void Engine::begin_desktop_overlay_pass(vk::CommandBuffer cmd) {
+    vk::RenderPassBeginInfo rp_begin{};
+    rp_begin.renderPass = *overlay_pass_;
+    rp_begin.framebuffer = *framebuffers_[image_index_];
+    rp_begin.renderArea = vk::Rect2D{{0, 0}, swapchain_extent_};
+
+    cmd.beginRenderPass(rp_begin, vk::SubpassContents::eInline);
+
+    vk::Viewport viewport{0, 0,
+        static_cast<float>(swapchain_extent_.width),
+        static_cast<float>(swapchain_extent_.height),
+        0.0f, 1.0f};
+    cmd.setViewport(0, viewport);
+
+    vk::Rect2D scissor{{0, 0}, swapchain_extent_};
+    cmd.setScissor(0, scissor);
+}
+
+void Engine::end_render_pass(vk::CommandBuffer cmd) {
+    cmd.endRenderPass();
+}
+
+void Engine::submit_and_present() {
+    auto& frame = frames_[frame_index_];
+    frame.command_buffer.end();
+
+    vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+    vk::SubmitInfo submit{};
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &current_acquire_sem_;
+    submit.pWaitDstStageMask = &wait_stage;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &*frame.command_buffer;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &current_render_sem_;
+
+    graphics_queue_.submit(submit, *frame.in_flight);
+
+    vk::PresentInfoKHR present{};
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &current_render_sem_;
+    present.swapchainCount = 1;
+    present.pSwapchains = &*swapchain_;
+    present.pImageIndices = &image_index_;
+
+    auto result = graphics_queue_.presentKHR(present);
+    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
+        recreate_swapchain();
+    }
+
+    frame_index_ = (frame_index_ + 1) % MAX_FRAMES_IN_FLIGHT;
+    ++frame_counter_;
+}
+
+void Engine::submit_xr_only() {
+    auto& frame = frames_[frame_index_];
+    frame.command_buffer.end();
+
+    vk::SubmitInfo submit{};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &*frame.command_buffer;
+
+    graphics_queue_.submit(submit, *frame.in_flight);
 
     frame_index_ = (frame_index_ + 1) % MAX_FRAMES_IN_FLIGHT;
     ++frame_counter_;

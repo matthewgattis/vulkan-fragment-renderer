@@ -10,6 +10,11 @@ layout(set = 0, binding = 0) uniform FrameUbo {
     float Time;
 };
 
+layout(set = 1, binding = 0) uniform RayUbo {
+    mat4 InvView;
+    mat4 InvProjection;
+};
+
 layout(push_constant) uniform PushConstants {
     mat4 Model;
 };
@@ -96,11 +101,13 @@ vec3 pal(in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d) {
 }
 
 void main() {
-    vec2 uv = FragCoord * vec2(Resolution.z, 1.0);
+    // Ray direction from precomputed inverse matrices — handles asymmetric
+    // XR frustums and avoids per-fragment matrix inversion.
+    vec4 eye_dir = InvProjection * vec4(FragCoord, 0.0, 1.0);
+    eye_dir.xyz /= eye_dir.w;
 
-    mat4 inv = inverse(View);
-    vec3 origin = inv[3].xyz;
-    vec3 direction = normalize((inv * vec4(normalize(vec3(uv, -1.0)), 0.0)).xyz);
+    vec3 origin = InvView[3].xyz;
+    vec3 direction = normalize((InvView * vec4(normalize(eye_dir.xyz), 0.0)).xyz);
 
     surface object;
     float dist = castRay(origin, direction, object);

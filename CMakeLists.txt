@@ -15,6 +15,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(unofficial-shaderc CONFIG REQUIRED)
 find_package(argparse CONFIG REQUIRED)
+find_package(OpenXR CONFIG REQUIRED)
 
 # Compile fullscreen vertex shader to SPIR-V at build time
 find_program(GLSLC glslc REQUIRED)
@@ -51,6 +52,7 @@ add_executable(vulkan-fragment-renderer
     src/ui.cpp
     src/camera.cpp
     src/vma_impl.cpp
+    src/xr_session.cpp
 )
 
 add_dependencies(vulkan-fragment-renderer shaders)
@@ -59,6 +61,8 @@ target_include_directories(vulkan-fragment-renderer PRIVATE ${CMAKE_CURRENT_SOUR
 
 target_compile_definitions(vulkan-fragment-renderer PRIVATE
     SHADER_DIR="${SHADER_OUTPUT_DIR}"
+    XR_USE_GRAPHICS_API_VULKAN
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
 
 target_link_libraries(vulkan-fragment-renderer PRIVATE
@@ -70,4 +74,5 @@ target_link_libraries(vulkan-fragment-renderer PRIVATE
     GPUOpen::VulkanMemoryAllocator
     unofficial::shaderc::shaderc
     argparse::argparse
+    OpenXR::openxr_loader
 )

@@ -1,16 +1,17 @@
 # vulkan-fragment-renderer
 
-A real-time GLSL fragment shader viewer built on Vulkan. Load any fragment shader and explore it interactively with an orbit/free-look camera.
+A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support. Load any fragment shader and explore it interactively with an orbit/free-look camera, or in VR with full 6DoF head tracking.
 
 ## Features
 
 - **Vulkan rendering** with VMA for memory management
+- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. Left eye mirrored to desktop window via blit (aspect-preserving fill). Enabled by default when a headset is available; disable with `--no-xr`
 - **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
 - **Hot-reload** — press `R` to recompile and reload the shader from disk
 - **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry
 - **Quaternion camera** — gimbal-lock-free orbit and free-look modes with physics-based movement
 - **Dear ImGui overlay** — FPS, camera info, and controls reference
-- **Frame UBO** — view, projection, resolution, and time uniforms available to all shaders
+- **Two-set descriptor layout** — set 0 (common frame data) for all shaders, set 1 (precomputed inverse matrices) for ray marching
 - **Push constants** — reserved for per-object model matrix (identity for fullscreen shaders)
 
 ## Building
@@ -32,6 +33,7 @@ cmake --build build
 ./build/vulkan-fragment-renderer <shader.glsl>
 ./build/vulkan-fragment-renderer example.glsl
 ./build/vulkan-fragment-renderer --low-dpi example.glsl
+./build/vulkan-fragment-renderer --no-xr example.glsl   # force desktop-only
 ```
 
 ## Controls
@@ -58,12 +60,18 @@ cmake --build build
 Fragment shaders receive these inputs:
 
 ```glsl
-// Frame uniforms (descriptor set 0, binding 0)
+// Set 0: common frame data (all shaders)
 layout(set = 0, binding = 0) uniform FrameUbo {
     mat4 View;
     mat4 Projection;
     vec4 Resolution;  // x, y, aspect, unused
     float Time;
+};
+
+// Set 1: precomputed inverses (ray marching shaders)
+layout(set = 1, binding = 0) uniform RayUbo {
+    mat4 InvView;
+    mat4 InvProjection;
 };
 
 // Per-object (push constant) — identity for fullscreen shaders
@@ -78,10 +86,19 @@ layout(location = 0) in vec2 FragCoord;  // (-1,-1) to (1,1)
 layout(location = 0) out vec4 outColor;
 ```
 
+Ray marching shaders should construct rays from the inverse matrices. This correctly handles asymmetric frustums (e.g. per-eye XR) and avoids per-fragment matrix inversion:
+
+```glsl
+vec4 eye_dir = InvProjection * vec4(FragCoord, 0.0, 1.0);
+eye_dir.xyz /= eye_dir.w;
+vec3 ro = InvView[3].xyz;
+vec3 rd = normalize((InvView * vec4(normalize(eye_dir.xyz), 0.0)).xyz);
+```
+
 To write depth (for future compositing with geometry):
 
 ```glsl
-vec3 hitPos = rayOrigin + rayDir * distance;
+vec3 hitPos = ro + rd * distance;
 vec4 clip = Projection * View * vec4(hitPos, 1.0);
 gl_FragDepth = clip.z / clip.w;
 ```
@@ -95,8 +112,9 @@ Managed via vcpkg (submoduled):
 - Vulkan 1.3
 - VMA (Vulkan Memory Allocator)
 - SDL3 (windowing, input)
+- OpenXR (HMD support via `XR_KHR_vulkan_enable`)
 - shaderc (runtime GLSL to SPIR-V)
 - Dear ImGui (debug UI)
-- GLM (math)
+- GLM (math, with `GLM_FORCE_DEPTH_ZERO_TO_ONE`)
 - spdlog (logging)
 - argparse (CLI)

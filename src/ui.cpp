@@ -71,10 +71,10 @@ void Ui::begin_frame() {
     ImGui::NewFrame();
 }
 
-void Ui::render(Camera& camera, float fps) {
+void Ui::render(Camera& camera, float fps, bool mouse_trapped) {
     if (!visible_) return;
 
-    ImGui::Begin("Info");
+    ImGui::Begin("Info", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("FPS: %.1f", fps);
     ImGui::Separator();
 
@@ -84,6 +84,12 @@ void Ui::render(Camera& camera, float fps) {
     float dist = camera.pivot_distance();
     ImGui::Text("Pivot distance: %.2f", dist);
 
+    ImGui::Separator();
+    if (mouse_trapped) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Mouse captured - press Escape to release");
+    } else {
+        ImGui::TextDisabled("Click viewport to capture mouse");
+    }
     ImGui::Separator();
     ImGui::TextDisabled("R: reload | G: toggle UI | F: fullscreen");
     ImGui::TextDisabled("C: reset camera | T: reset time");
@@ -96,8 +102,14 @@ void Ui::end_frame(vk::CommandBuffer cmd) {
 }
 
 bool Ui::wants_input() const {
+    if (!visible_) return false;
     auto& io = ImGui::GetIO();
     return io.WantCaptureMouse || io.WantCaptureKeyboard;
+}
+
+bool Ui::wants_mouse() const {
+    if (!visible_) return false;
+    return ImGui::GetIO().WantCaptureMouse;
 }
 
 } // namespace vfr

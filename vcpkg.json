@@ -15,6 +15,7 @@
       "name": "imgui",
       "features": ["sdl3-binding", "vulkan-binding"]
     },
-    "argparse"
+    "argparse",
+    "openxr-loader"
   ]
 }
