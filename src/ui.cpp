@@ -1,18 +1,16 @@
-#define LOG_MODULE_NAME "ui"
-
 #include "ui.hpp"
 #include "engine.hpp"
 #include "window.hpp"
 #include "camera.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 #include <SDL3/SDL.h>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("ui");
 
 namespace vfr {
 
@@ -54,7 +52,7 @@ Ui::Ui(Engine& engine, Window& window) : engine_(engine) {
 
     ImGui_ImplVulkan_Init(&init_info);
 
-    LOG_INFO("ImGui initialized");
+    logger->info("ImGui initialized");
 }
 
 Ui::~Ui() {

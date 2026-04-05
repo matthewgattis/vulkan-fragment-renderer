@@ -1,13 +1,11 @@
-#define LOG_MODULE_NAME "engine"
-
 #include "engine.hpp"
 #include "window.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <algorithm>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("engine");
 
 namespace vfr {
 
@@ -25,7 +23,7 @@ Engine::Engine(Window& window) : window_(window) {
     create_command_pool();
     create_sync_objects();
 
-    LOG_INFO("engine initialized");
+    logger->info("engine initialized");
 }
 
 Engine::~Engine() {
@@ -78,7 +76,7 @@ void Engine::create_instance() {
     if (has_validation) {
         create_info.enabledLayerCount = 1;
         create_info.ppEnabledLayerNames = &validation_layer;
-        LOG_INFO("validation layers enabled");
+        logger->info("validation layers enabled");
     }
 #endif
 
@@ -101,7 +99,7 @@ void Engine::create_device() {
     }
     physical_device_ = std::move(physical_devices[chosen]);
 
-    LOG_INFO("using GPU: {}", std::string(physical_device_.getProperties().deviceName));
+    logger->info("using GPU: {}", std::string(physical_device_.getProperties().deviceName));
 
     // Find graphics queue family
     auto families = physical_device_.getQueueFamilyProperties();
@@ -252,7 +250,7 @@ void Engine::create_swapchain() {
     dv_info.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1};
     depth_view_ = vk::raii::ImageView(device_, dv_info);
 
-    LOG_INFO("swapchain created: {}x{}, {} images",
+    logger->info("swapchain created: {}x{}, {} images",
              swapchain_extent_.width, swapchain_extent_.height, swapchain_images_.size());
 }
 
@@ -462,7 +460,7 @@ void Engine::recreate_swapchain() {
         render_semaphores_.emplace_back(device_, vk::SemaphoreCreateInfo{});
     }
     semaphore_index_ = 0;
-    LOG_INFO("swapchain recreated");
+    logger->info("swapchain recreated");
 }
 
 void Engine::submit_immediate(std::function<void(vk::CommandBuffer)> fn) {

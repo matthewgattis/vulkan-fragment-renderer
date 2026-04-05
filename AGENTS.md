@@ -28,7 +28,7 @@ cmake --preset default && cmake --build build
 - **Types:** `PascalCase`. **Variables:** `snake_case_`. **Constants:** `UPPER_CASE`.
 - **RAII:** `vk::raii::*` types exclusively. No manual Vulkan cleanup except VMA resources.
 - **VMA:** Single `vma_impl.cpp` compilation unit. Dynamic Vulkan function loading.
-- **Logging:** Per-module via spdlog. Define `LOG_MODULE_NAME` before including `log.hpp`. Create logger with `spdlog::stdout_color_mt(LOG_MODULE_NAME)` as file-level static.
+- **Logging:** Per-module via spdlog. Create a named logger with `spdlog::stdout_color_mt("module_name")` as a file-level static, then call `logger->info(...)` etc. directly.
 - **Dependencies:** vcpkg submodule at `./vcpkg/`. All deps in `vcpkg.json`.
 
 ## Rendering Pipeline

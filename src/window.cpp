@@ -1,13 +1,11 @@
-#define LOG_MODULE_NAME "window"
-
 #include "window.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdexcept>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("window");
 
 namespace vfr {
 
@@ -26,7 +24,7 @@ Window::Window(const std::string& title, int width, int height, bool high_dpi) {
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
-    LOG_INFO("created {}x{} window (dpi scale: {:.1f})", width, height, dpi_scale());
+    logger->info("created {}x{} window (dpi scale: {:.1f})", width, height, dpi_scale());
 }
 
 Window::~Window() {
