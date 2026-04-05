@@ -22,8 +22,8 @@ public:
     float pivot_distance() const { return pivot_distance_; }
 
 private:
-    // Default: look along world +Y with Z up (90° rotation around X)
-    glm::quat orientation_ = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    // Default: identity. Standard right-handed: forward = -Z, up = +Y, right = +X.
+    glm::quat orientation_ = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     float pivot_distance_ = 3.0f;
     glm::vec3 pivot_{0.0f};
 

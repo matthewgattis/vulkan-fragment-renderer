@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan_raii.hpp>
+#include <span>
 #include <vector>
 
 namespace vfr {
@@ -11,7 +12,7 @@ public:
              vk::RenderPass render_pass,
              const std::vector<uint32_t>& vert_spirv,
              const std::vector<uint32_t>& frag_spirv,
-             vk::DescriptorSetLayout frame_descriptor_layout,
+             std::span<const vk::DescriptorSetLayout> descriptor_layouts,
              bool depth_write = true);
 
     void bind(vk::CommandBuffer cmd) const;

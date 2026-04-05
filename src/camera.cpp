@@ -5,12 +5,9 @@
 
 namespace vfr {
 
-// Default orientation: camera looks along world +Y with Z up.
-// Camera convention: forward = -Z, up = +Y, right = +X.
-// So we need: camera -Z → world +Y, camera +Y → world +Z, camera +X → world +X.
-// This is a 90° rotation around X.
-static const glm::quat DEFAULT_ORIENTATION =
-    glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+// Default orientation: identity quaternion.
+// Standard right-handed convention: forward = -Z, up = +Y, right = +X.
+static const glm::quat DEFAULT_ORIENTATION = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
 void Camera::on_mouse_move(float dx, float dy, bool free_look, bool orbiting, bool panning) {
     if (free_look) {

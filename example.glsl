@@ -10,6 +10,11 @@ layout(set = 0, binding = 0) uniform FrameUbo {
     float Time;
 };
 
+layout(set = 1, binding = 0) uniform RayUbo {
+    mat4 InvView;
+    mat4 InvProjection;
+};
+
 layout(push_constant) uniform PushConstants {
     mat4 Model;
 };
@@ -46,12 +51,13 @@ vec3 palette(float t) {
 }
 
 void main() {
-    vec2 uv = FragCoord * vec2(Resolution.z, 1.0);
+    // Ray direction from precomputed inverse matrices — handles asymmetric
+    // XR frustums and avoids per-fragment matrix inversion.
+    vec4 eye_dir = InvProjection * vec4(FragCoord, 0.0, 1.0);
+    eye_dir.xyz /= eye_dir.w;
 
-    // Camera from view matrix
-    mat4 inv = inverse(View);
-    vec3 ro = inv[3].xyz;
-    vec3 rd = normalize((inv * vec4(normalize(vec3(uv, -1.5)), 0.0)).xyz);
+    vec3 ro = InvView[3].xyz;
+    vec3 rd = normalize((InvView * vec4(normalize(eye_dir.xyz), 0.0)).xyz);
 
     // Ray march
     float t = 0.0;
@@ -67,7 +73,7 @@ void main() {
     if (d < 0.01) {
         vec3 p = ro + rd * t;
         vec3 n = calcNormal(p);
-        vec3 light = normalize(vec3(1.0, 2.0, 3.0));
+        vec3 light = normalize(vec3(1.0, 3.0, 2.0));
         float diff = max(dot(n, light), 0.0);
         float halfLambert = diff * 0.5 + 0.5;
         col = palette(t * 0.05 + Time * 0.1) * halfLambert;

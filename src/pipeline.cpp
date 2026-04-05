@@ -15,7 +15,7 @@ Pipeline::Pipeline(const vk::raii::Device& device,
                    vk::RenderPass render_pass,
                    const std::vector<uint32_t>& vert_spirv,
                    const std::vector<uint32_t>& frag_spirv,
-                   vk::DescriptorSetLayout frame_descriptor_layout,
+                   std::span<const vk::DescriptorSetLayout> descriptor_layouts,
                    bool depth_write)
 {
     auto vert_module = ShaderCompiler::create_module(device, vert_spirv);
@@ -71,8 +71,8 @@ Pipeline::Pipeline(const vk::raii::Device& device,
     push_range.size = sizeof(glm::mat4);
 
     vk::PipelineLayoutCreateInfo layout_info{};
-    layout_info.setLayoutCount = 1;
-    layout_info.pSetLayouts = &frame_descriptor_layout;
+    layout_info.setLayoutCount = static_cast<uint32_t>(descriptor_layouts.size());
+    layout_info.pSetLayouts = descriptor_layouts.data();
     layout_info.pushConstantRangeCount = 1;
     layout_info.pPushConstantRanges = &push_range;
 
