@@ -1,8 +1,6 @@
-#define LOG_MODULE_NAME "xr"
-
 #include "xr_session.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -10,7 +8,7 @@
 #include <cstring>
 #include <cmath>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("xr");
 
 namespace vfr {
 
@@ -36,7 +34,7 @@ static std::vector<std::string> split_extensions(const std::string& str) {
     do {                                                        \
         XrResult _r = (call);                                   \
         if (XR_FAILED(_r)) {                                    \
-            LOG_ERROR("{}: XrResult {}", msg, static_cast<int>(_r)); \
+            logger->error("{}: XrResult {}", msg, static_cast<int>(_r)); \
             throw std::runtime_error(msg);                      \
         }                                                       \
     } while (0)
@@ -62,8 +60,8 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
 
     XrResult result = xrCreateInstance(&instance_ci, &s_xr_instance_);
     if (XR_FAILED(result)) {
-        LOG_INFO("no OpenXR runtime available (result: {}), proceeding desktop-only",
-                 static_cast<int>(result));
+        logger->info("no OpenXR runtime available (result: {}), proceeding desktop-only",
+                     static_cast<int>(result));
         s_xr_instance_ = XR_NULL_HANDLE;
         return std::nullopt;
     }
@@ -72,10 +70,10 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
     XrInstanceProperties props{};
     props.type = XR_TYPE_INSTANCE_PROPERTIES;
     xrGetInstanceProperties(s_xr_instance_, &props);
-    LOG_INFO("OpenXR runtime: {} v{}.{}.{}", props.runtimeName,
-             XR_VERSION_MAJOR(props.runtimeVersion),
-             XR_VERSION_MINOR(props.runtimeVersion),
-             XR_VERSION_PATCH(props.runtimeVersion));
+    logger->info("OpenXR runtime: {} v{}.{}.{}", props.runtimeName,
+                 XR_VERSION_MAJOR(props.runtimeVersion),
+                 XR_VERSION_MINOR(props.runtimeVersion),
+                 XR_VERSION_PATCH(props.runtimeVersion));
 
     // Get HMD system
     XrSystemGetInfo system_info{};
@@ -84,8 +82,8 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
 
     result = xrGetSystem(s_xr_instance_, &system_info, &s_xr_system_id_);
     if (XR_FAILED(result)) {
-        LOG_INFO("no HMD detected (result: {}), proceeding desktop-only",
-                 static_cast<int>(result));
+        logger->info("no HMD detected (result: {}), proceeding desktop-only",
+                     static_cast<int>(result));
         xrDestroyInstance(s_xr_instance_);
         s_xr_instance_ = XR_NULL_HANDLE;
         return std::nullopt;
@@ -94,7 +92,7 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
     XrSystemProperties sys_props{};
     sys_props.type = XR_TYPE_SYSTEM_PROPERTIES;
     xrGetSystemProperties(s_xr_instance_, s_xr_system_id_, &sys_props);
-    LOG_INFO("HMD: {}", sys_props.systemName);
+    logger->info("HMD: {}", sys_props.systemName);
 
     // Get Vulkan graphics requirements
     PFN_xrGetVulkanGraphicsRequirementsKHR getReqs = nullptr;
@@ -105,7 +103,7 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
     gfx_reqs.type = XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR;
     getReqs(s_xr_instance_, s_xr_system_id_, &gfx_reqs);
 
-    LOG_INFO("XR Vulkan requirements: min {}.{}.{}, max {}.{}.{}",
+    logger->info("XR Vulkan requirements: min {}.{}.{}, max {}.{}.{}",
              XR_VERSION_MAJOR(gfx_reqs.minApiVersionSupported),
              XR_VERSION_MINOR(gfx_reqs.minApiVersionSupported),
              XR_VERSION_PATCH(gfx_reqs.minApiVersionSupported),
@@ -140,9 +138,9 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
     reqs.device_extensions = split_extensions(dev_ext_str);
 
     for (auto& ext : reqs.instance_extensions)
-        LOG_INFO("  XR requires VK instance ext: {}", ext);
+        logger->info("  XR requires VK instance ext: {}", ext);
     for (auto& ext : reqs.device_extensions)
-        LOG_INFO("  XR requires VK device ext: {}", ext);
+        logger->info("  XR requires VK device ext: {}", ext);
 
     return reqs;
 }
@@ -205,7 +203,7 @@ XrSession::XrSession(VkInstance vk_instance, VkPhysicalDevice physical_device,
 
     XR_CHECK(xrCreateSession(xr_instance_, &session_ci, &xr_session_),
              "failed to create XR session");
-    LOG_INFO("XR session created");
+    logger->info("XR session created");
 
     // Create LOCAL reference space (seated, no room boundaries)
     XrReferenceSpaceCreateInfo space_ci{};
@@ -219,7 +217,7 @@ XrSession::XrSession(VkInstance vk_instance, VkPhysicalDevice physical_device,
     create_render_pass();
     create_swapchains();
 
-    LOG_INFO("XR initialized: {}x{} per eye", eye_extent_.width, eye_extent_.height);
+    logger->info("XR initialized: {}x{} per eye", eye_extent_.width, eye_extent_.height);
 }
 
 XrSession::~XrSession() {
@@ -324,7 +322,7 @@ void XrSession::create_swapchains() {
         config_views[0].recommendedImageRectWidth,
         config_views[0].recommendedImageRectHeight};
 
-    LOG_INFO("recommended eye resolution: {}x{}", eye_extent_.width, eye_extent_.height);
+    logger->info("recommended eye resolution: {}x{}", eye_extent_.width, eye_extent_.height);
 
     for (uint32_t eye = 0; eye < 2; ++eye) {
         // Create color swapchain
@@ -355,7 +353,7 @@ void XrSession::create_swapchains() {
                                    reinterpret_cast<XrSwapchainImageBaseHeader*>(
                                        eyes_[eye].images.data()));
 
-        LOG_INFO("eye {} swapchain: {} images", eye, image_count);
+        logger->info("eye {} swapchain: {} images", eye, image_count);
 
         // Create image views for each swapchain image
         for (uint32_t i = 0; i < image_count; ++i) {
@@ -422,7 +420,7 @@ void XrSession::poll_events() {
             auto* state_event = reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
             session_state_ = state_event->state;
 
-            LOG_INFO("XR session state: {}", static_cast<int>(session_state_));
+            logger->info("XR session state: {}", static_cast<int>(session_state_));
 
             if (session_state_ == XR_SESSION_STATE_READY) {
                 XrSessionBeginInfo begin_info{};
@@ -431,11 +429,11 @@ void XrSession::poll_events() {
                 XR_CHECK(xrBeginSession(xr_session_, &begin_info),
                          "failed to begin XR session");
                 session_running_ = true;
-                LOG_INFO("XR session started");
+                logger->info("XR session started");
             } else if (session_state_ == XR_SESSION_STATE_STOPPING) {
                 xrEndSession(xr_session_);
                 session_running_ = false;
-                LOG_INFO("XR session stopped");
+                logger->info("XR session stopped");
             }
         }
 

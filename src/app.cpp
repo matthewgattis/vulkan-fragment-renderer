@@ -1,9 +1,7 @@
-#define LOG_MODULE_NAME "app"
-
 #include "app.hpp"
 #include "shader_compiler.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <SDL3/SDL.h>
@@ -12,7 +10,7 @@
 #include <sstream>
 #include <cstring>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("app");
 
 namespace vfr {
 
@@ -176,7 +174,7 @@ void App::create_frame_descriptors() {
         }
     }
 
-    LOG_INFO("frame descriptors created");
+    logger->info("frame descriptors created");
 }
 
 void App::update_frame_ubo(uint32_t frame_index) {
@@ -575,13 +573,13 @@ void App::process_events() {
 
 void App::reload_shader() {
     if (shader_path_.empty()) {
-        LOG_WARN("no shader path specified");
+        logger->warn("no shader path specified");
         return;
     }
 
     std::ifstream file(shader_path_);
     if (!file) {
-        LOG_ERROR("failed to open shader: {}", shader_path_.string());
+        logger->error("failed to open shader: {}", shader_path_.string());
         return;
     }
 
@@ -593,9 +591,9 @@ void App::reload_shader() {
         auto frag_spirv = ShaderCompiler::compile_glsl(
             source, vk::ShaderStageFlagBits::eFragment, shader_path_.string());
         build_pipeline(frag_spirv);
-        LOG_INFO("shader loaded: {}", shader_path_.string());
+        logger->info("shader loaded: {}", shader_path_.string());
     } catch (const std::exception& e) {
-        LOG_ERROR("shader reload failed: {}", e.what());
+        logger->error("shader reload failed: {}", e.what());
     }
 }
 
@@ -617,7 +615,7 @@ void App::unload_shader() {
     if (pipeline_) {
         engine_.device().waitIdle();
         pipeline_.reset();
-        LOG_INFO("shader unloaded");
+        logger->info("shader unloaded");
     }
 }
 

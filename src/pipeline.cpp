@@ -1,13 +1,11 @@
-#define LOG_MODULE_NAME "pipeline"
-
 #include "pipeline.hpp"
 #include "shader_compiler.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <glm/glm.hpp>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("pipeline");
 
 namespace vfr {
 
@@ -94,7 +92,7 @@ Pipeline::Pipeline(const vk::raii::Device& device,
 
     pipeline_ = vk::raii::Pipeline(device, nullptr, pipeline_info);
 
-    LOG_INFO("graphics pipeline created");
+    logger->info("graphics pipeline created");
 }
 
 void Pipeline::bind(vk::CommandBuffer cmd) const {

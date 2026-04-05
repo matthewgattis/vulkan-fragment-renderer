@@ -1,14 +1,12 @@
-#define LOG_MODULE_NAME "shader"
-
 #include "shader_compiler.hpp"
-#include "log.hpp"
 
+#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <shaderc/shaderc.hpp>
 #include <fstream>
 #include <stdexcept>
 
-static auto logger = spdlog::stdout_color_mt(LOG_MODULE_NAME);
+static auto logger = spdlog::stdout_color_mt("shader");
 
 namespace vfr {
 
@@ -35,12 +33,12 @@ std::vector<uint32_t> ShaderCompiler::compile_glsl(
         source, to_shaderc_kind(stage), filename.c_str(), options);
 
     if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
-        LOG_ERROR("shader compilation failed:\n{}", result.GetErrorMessage());
+        logger->error("shader compilation failed:\n{}", result.GetErrorMessage());
         throw std::runtime_error("shader compilation failed: " + result.GetErrorMessage());
     }
 
     if (result.GetNumWarnings() > 0) {
-        LOG_WARN("shader warnings:\n{}", result.GetErrorMessage());
+        logger->warn("shader warnings:\n{}", result.GetErrorMessage());
     }
 
     return {result.cbegin(), result.cend()};
