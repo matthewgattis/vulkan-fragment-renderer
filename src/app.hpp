@@ -51,6 +51,7 @@ private:
                               vk::Extent2D extent);
     void run_desktop_frame(float dt);
     void run_xr_frame(float dt);
+    void blit_xr_mirror(vk::CommandBuffer cmd);
 
     bool xr_mode_ = false;
     std::unique_ptr<XrSession> xr_session_;
@@ -90,6 +91,7 @@ private:
     std::array<std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT>, 2> xr_eye_ray_sets_{};
     std::array<std::array<MappedBuffer, MAX_FRAMES_IN_FLIGHT>, 2> xr_eye_ray_buffers_{};
 
+    bool mirror_acquired_ = false;
     bool running_ = true;
     bool mouse_left_ = false;
     bool mouse_right_ = false;

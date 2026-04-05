@@ -48,7 +48,11 @@ public:
     std::array<XrEyeRenderInfo, 2> locate_views(const glm::vec3& body_position);
     void begin_eye_render(vk::CommandBuffer cmd, uint32_t eye);
     void end_eye_render(vk::CommandBuffer cmd, uint32_t eye);
+    void end_eye_render_pass(vk::CommandBuffer cmd, uint32_t eye);
+    void release_eye(uint32_t eye);
     void end_frame();
+
+    vk::Image eye_color_image(uint32_t eye) const;
 
     bool session_running() const { return session_running_; }
     vk::Extent2D eye_extent() const { return eye_extent_; }

@@ -58,6 +58,7 @@ public:
     vk::RenderPass render_pass() const { return *render_pass_; }
     vk::Extent2D swapchain_extent() const { return swapchain_extent_; }
     vk::Format swapchain_format() const { return swapchain_format_; }
+    vk::Image desktop_image() const { return swapchain_images_[image_index_]; }
     uint32_t frame_index() const { return frame_index_; }
     uint32_t graphics_queue_family() const { return graphics_family_; }
     vk::Queue graphics_queue() const { return *graphics_queue_; }

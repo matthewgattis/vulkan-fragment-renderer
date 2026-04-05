@@ -288,21 +288,135 @@ void App::run_xr_frame(float /*dt*/) {
                     0, sizeof(model), &model);
                 cmd.draw(3, 1, 0, 0);
 
-                xr_session_->end_eye_render(cmd, eye);
+                if (eye == 0) {
+                    // Left eye: end render pass but hold the image for mirror blit
+                    xr_session_->end_eye_render_pass(cmd, eye);
+                } else {
+                    xr_session_->end_eye_render(cmd, eye);
+                }
             }
         } else {
             // No pipeline — still need to acquire/release swapchain images
             for (uint32_t eye = 0; eye < 2; ++eye) {
                 xr_session_->begin_eye_render(cmd, eye);
-                xr_session_->end_eye_render(cmd, eye);
+                if (eye == 0) {
+                    xr_session_->end_eye_render_pass(cmd, eye);
+                } else {
+                    xr_session_->end_eye_render(cmd, eye);
+                }
             }
         }
 
-        // Submit the command buffer (no desktop present in XR mode for now)
-        engine_.submit_xr_only();
+        // Mirror left eye to desktop window
+        blit_xr_mirror(cmd);
+
+        // Release left eye now that the blit is recorded
+        xr_session_->release_eye(0);
+
+        // Submit with desktop present (or XR-only if mirror failed)
+        if (mirror_acquired_) {
+            engine_.submit_and_present();
+            mirror_acquired_ = false;
+        } else {
+            engine_.submit_xr_only();
+        }
     }
 
     xr_session_->end_frame();
+}
+
+void App::blit_xr_mirror(vk::CommandBuffer cmd) {
+    mirror_acquired_ = false;
+    if (!engine_.acquire_desktop_image()) return;
+    mirror_acquired_ = true;
+
+    vk::Image src = xr_session_->eye_color_image(0);
+    vk::Image dst = engine_.desktop_image();
+    vk::Extent2D src_extent = xr_session_->eye_extent();
+    vk::Extent2D dst_extent = engine_.swapchain_extent();
+
+    // Transition src (XR left eye): COLOR_ATTACHMENT_OPTIMAL → TRANSFER_SRC_OPTIMAL
+    vk::ImageMemoryBarrier src_to_transfer{};
+    src_to_transfer.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    src_to_transfer.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+    src_to_transfer.image = src;
+    src_to_transfer.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    src_to_transfer.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+    src_to_transfer.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+    // Transition dst (desktop): UNDEFINED → TRANSFER_DST_OPTIMAL
+    vk::ImageMemoryBarrier dst_to_transfer{};
+    dst_to_transfer.oldLayout = vk::ImageLayout::eUndefined;
+    dst_to_transfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
+    dst_to_transfer.image = dst;
+    dst_to_transfer.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    dst_to_transfer.srcAccessMask = {};
+    dst_to_transfer.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+    std::array pre_barriers = {src_to_transfer, dst_to_transfer};
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        vk::PipelineStageFlagBits::eTransfer,
+        {}, nullptr, nullptr, pre_barriers);
+
+    // Blit with aspect-ratio-preserving fill (crop source to match destination aspect)
+    float src_aspect = static_cast<float>(src_extent.width) / static_cast<float>(src_extent.height);
+    float dst_aspect = static_cast<float>(dst_extent.width) / static_cast<float>(dst_extent.height);
+
+    int32_t sx0 = 0, sy0 = 0;
+    int32_t sx1 = static_cast<int32_t>(src_extent.width);
+    int32_t sy1 = static_cast<int32_t>(src_extent.height);
+
+    if (src_aspect > dst_aspect) {
+        // Source is wider — crop sides
+        int32_t crop_w = static_cast<int32_t>(src_extent.height * dst_aspect);
+        sx0 = (static_cast<int32_t>(src_extent.width) - crop_w) / 2;
+        sx1 = sx0 + crop_w;
+    } else {
+        // Source is taller — crop top/bottom
+        int32_t crop_h = static_cast<int32_t>(src_extent.width / dst_aspect);
+        sy0 = (static_cast<int32_t>(src_extent.height) - crop_h) / 2;
+        sy1 = sy0 + crop_h;
+    }
+
+    vk::ImageBlit region{};
+    region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+    region.srcOffsets[0] = vk::Offset3D{sx0, sy0, 0};
+    region.srcOffsets[1] = vk::Offset3D{sx1, sy1, 1};
+    region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+    region.dstOffsets[0] = vk::Offset3D{0, 0, 0};
+    region.dstOffsets[1] = vk::Offset3D{
+        static_cast<int32_t>(dst_extent.width),
+        static_cast<int32_t>(dst_extent.height), 1};
+
+    cmd.blitImage(
+        src, vk::ImageLayout::eTransferSrcOptimal,
+        dst, vk::ImageLayout::eTransferDstOptimal,
+        region, vk::Filter::eLinear);
+
+    // Transition src back: TRANSFER_SRC → COLOR_ATTACHMENT_OPTIMAL (for XR runtime)
+    vk::ImageMemoryBarrier src_back{};
+    src_back.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+    src_back.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    src_back.image = src;
+    src_back.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    src_back.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+    src_back.dstAccessMask = {};
+
+    // Transition dst: TRANSFER_DST → PRESENT_SRC_KHR
+    vk::ImageMemoryBarrier dst_to_present{};
+    dst_to_present.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    dst_to_present.newLayout = vk::ImageLayout::ePresentSrcKHR;
+    dst_to_present.image = dst;
+    dst_to_present.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    dst_to_present.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+    dst_to_present.dstAccessMask = {};
+
+    std::array post_barriers = {src_back, dst_to_present};
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eBottomOfPipe,
+        {}, nullptr, nullptr, post_barriers);
 }
 
 void App::update_frame_ubo_xr(uint32_t eye, uint32_t frame_index,

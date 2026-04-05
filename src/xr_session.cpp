@@ -531,12 +531,24 @@ void XrSession::begin_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
 }
 
 void XrSession::end_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
-    cmd.endRenderPass();
+    end_eye_render_pass(cmd, eye);
+    release_eye(eye);
+}
 
+void XrSession::end_eye_render_pass(vk::CommandBuffer cmd, uint32_t /*eye*/) {
+    cmd.endRenderPass();
+}
+
+void XrSession::release_eye(uint32_t eye) {
     XrSwapchainImageReleaseInfo release_info{};
     release_info.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
     XR_CHECK(xrReleaseSwapchainImage(eyes_[eye].handle, &release_info),
              "xrReleaseSwapchainImage failed");
+}
+
+vk::Image XrSession::eye_color_image(uint32_t eye) const {
+    auto& sc = eyes_[eye];
+    return vk::Image(sc.images[sc.current_index].image);
 }
 
 void XrSession::end_frame() {

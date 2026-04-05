@@ -43,9 +43,11 @@ cmake --preset default && cmake --build build
 ### XR path
 1. `poll_events()` — XR session state machine.
 2. `wait_and_begin_frame()` — synchronize with runtime.
-3. For each eye: update per-eye UBOs, `begin_eye_render()`, bind/draw, `end_eye_render()`.
-4. `submit_xr_only()` — submit command buffer (no desktop present).
-5. `end_frame()` — submit composition layers to runtime.
+3. Left eye: update UBOs, `begin_eye_render()`, bind/draw, `end_eye_render_pass()` (render pass only — image held for mirror).
+4. Right eye: update UBOs, `begin_eye_render()`, bind/draw, `end_eye_render()` (full release).
+5. `blit_xr_mirror()` — acquire desktop swapchain image, blit left eye with aspect-preserving fill crop, release left eye XR image.
+6. `submit_and_present()` — submit command buffer + present desktop mirror. Falls back to `submit_xr_only()` if window unavailable.
+7. `end_frame()` — submit composition layers to runtime.
 
 ### Descriptor sets
 - **Set 0** (binding 0, `FrameUbo`): `mat4 view`, `mat4 projection`, `vec4 resolution`, `float time` — common to all shaders.

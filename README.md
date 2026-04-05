@@ -5,7 +5,7 @@ A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support.
 ## Features
 
 - **Vulkan rendering** with VMA for memory management
-- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. Enabled by default when a headset is available; disable with `--no-xr`
+- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. Left eye mirrored to desktop window via blit (aspect-preserving fill). Enabled by default when a headset is available; disable with `--no-xr`
 - **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
 - **Hot-reload** — press `R` to recompile and reload the shader from disk
 - **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry
