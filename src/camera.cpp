@@ -33,28 +33,55 @@ void Camera::on_mouse_move(float dx, float dy, bool free_look, bool orbiting, bo
     }
 }
 
-void Camera::on_scroll(float delta) {
-    pivot_distance_ = std::max(0.1f, pivot_distance_ - delta * ZOOM_SPEED * pivot_distance_);
+void Camera::on_scroll(float delta, float speed) {
+    pivot_distance_ = std::max(0.1f, pivot_distance_ - delta * speed * pivot_distance_);
 }
 
-void Camera::on_key_move(const glm::vec3& direction, float dt) {
-    glm::vec3 world_dir = right() * direction.x + forward() * direction.y + up() * direction.z;
-    velocity_ += world_dir * ACCELERATION * dt * pivot_distance_;
+void Camera::adjust_pivot_distance(float delta, float speed) {
+    // Change pivot distance without moving the camera — shift pivot to compensate.
+    glm::vec3 eye = position();
+    pivot_distance_ = std::max(0.1f, pivot_distance_ - delta * speed * pivot_distance_);
+    pivot_ = eye + forward() * pivot_distance_;
+}
+
+void Camera::set_move_direction(const glm::vec3& local_direction) {
+    move_direction_ = right() * local_direction.x + forward() * local_direction.y + up() * local_direction.z;
+}
+
+void Camera::set_move_direction_world(const glm::vec3& world_direction) {
+    move_direction_ = world_direction;
 }
 
 void Camera::update(float dt) {
+    float max_speed = MAX_VELOCITY * pivot_distance_;
+
+    // Acceleration in move direction
+    if (glm::length(move_direction_) > 0.0f) {
+        velocity_ += glm::normalize(move_direction_) * ACCELERATION * pivot_distance_ * dt;
+    }
+
+    // Friction opposing current velocity
     float speed = glm::length(velocity_);
-    if (speed > MAX_VELOCITY * pivot_distance_) {
-        velocity_ *= (MAX_VELOCITY * pivot_distance_) / speed;
+    float friction_decel = FRICTION * pivot_distance_ * dt;
+    if (speed > friction_decel) {
+        velocity_ -= glm::normalize(velocity_) * friction_decel;
+    } else {
+        velocity_ = glm::vec3(0.0f);
+    }
+
+    // Clamp to max speed
+    speed = glm::length(velocity_);
+    if (speed > max_speed) {
+        velocity_ *= max_speed / speed;
     }
 
     pivot_ += velocity_ * dt;
-    velocity_ *= std::max(0.0f, 1.0f - FRICTION * dt);
+    move_direction_ = glm::vec3(0.0f);
 }
 
 void Camera::reset() {
     orientation_ = DEFAULT_ORIENTATION;
-    pivot_distance_ = 3.0f;
+    pivot_distance_ = 4.0f;
     pivot_ = glm::vec3(0.0f);
     velocity_ = glm::vec3(0.0f);
 }

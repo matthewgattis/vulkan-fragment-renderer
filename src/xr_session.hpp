@@ -45,7 +45,7 @@ public:
     // Per-frame
     void poll_events();
     bool wait_and_begin_frame();
-    std::array<XrEyeRenderInfo, 2> locate_views(const glm::vec3& body_position);
+    std::array<XrEyeRenderInfo, 2> locate_views(const glm::mat4& camera_world);
     void begin_eye_render(vk::CommandBuffer cmd, uint32_t eye);
     void end_eye_render(vk::CommandBuffer cmd, uint32_t eye);
     void end_eye_render_pass(vk::CommandBuffer cmd, uint32_t eye);
@@ -61,7 +61,7 @@ private:
     void create_render_pass();
     void create_swapchains();
 
-    glm::mat4 xr_pose_to_view_matrix(const XrPosef& pose, const glm::vec3& body_pos);
+    glm::mat4 xr_pose_to_view_matrix(const XrPosef& pose, const glm::mat4& camera_world);
     glm::mat4 xr_fov_to_projection(const XrFovf& fov, float near_z, float far_z);
 
     // XR core

@@ -19,12 +19,13 @@ public:
 
     void process_event(const SDL_Event& event);
     void begin_frame();
-    void render(Camera& camera, float fps);
+    void render(Camera& camera, float fps, bool mouse_trapped);
     void end_frame(vk::CommandBuffer cmd);
 
     bool visible() const { return visible_; }
     void toggle() { visible_ = !visible_; }
     bool wants_input() const;
+    bool wants_mouse() const;
 
 private:
     Engine& engine_;

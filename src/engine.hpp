@@ -42,7 +42,8 @@ public:
     // Decomposed frame lifecycle for XR mode
     vk::CommandBuffer begin_command_buffer();          // fence wait + cmd begin (no swapchain)
     bool acquire_desktop_image();                       // acquire swapchain image, returns false if out of date
-    void begin_desktop_render_pass(vk::CommandBuffer cmd); // begin render pass on desktop framebuffer
+    void begin_desktop_render_pass(vk::CommandBuffer cmd); // begin render pass on desktop framebuffer (clear)
+    void begin_desktop_overlay_pass(vk::CommandBuffer cmd); // begin overlay pass (load, no clear)
     void end_render_pass(vk::CommandBuffer cmd);        // end current render pass
     void submit_and_present();                          // submit cmd + present desktop
     void submit_xr_only();                              // submit cmd (no swapchain semaphores or present)
@@ -111,6 +112,7 @@ private:
 
     // Render pass & framebuffers
     vk::raii::RenderPass render_pass_{nullptr};
+    vk::raii::RenderPass overlay_pass_{nullptr};  // loadOp=eLoad, for compositing on top of blits
     std::vector<vk::raii::Framebuffer> framebuffers_;
 
     // Commands & sync

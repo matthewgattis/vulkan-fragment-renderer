@@ -51,7 +51,7 @@ private:
                               vk::Extent2D extent);
     void run_desktop_frame(float dt);
     void run_xr_frame(float dt);
-    void blit_xr_mirror(vk::CommandBuffer cmd);
+    bool blit_xr_mirror(vk::CommandBuffer cmd);
 
     bool xr_mode_ = false;
     std::unique_ptr<XrSession> xr_session_;
@@ -91,8 +91,17 @@ private:
     std::array<std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT>, 2> xr_eye_ray_sets_{};
     std::array<std::array<MappedBuffer, MAX_FRAMES_IN_FLIGHT>, 2> xr_eye_ray_buffers_{};
 
-    bool mirror_acquired_ = false;
+    // HMD world-space basis (from previous frame, for input processing)
+    bool hmd_active_ = false;
+    glm::vec3 hmd_forward_{0.0f, 0.0f, -1.0f};
+    glm::vec3 hmd_right_{1.0f, 0.0f, 0.0f};
+    glm::vec3 hmd_up_{0.0f, 1.0f, 0.0f};
+
+    void trap_mouse();
+    void untrap_mouse();
+
     bool running_ = true;
+    bool mouse_trapped_ = false;
     bool mouse_left_ = false;
     bool mouse_right_ = false;
     bool mouse_middle_ = false;

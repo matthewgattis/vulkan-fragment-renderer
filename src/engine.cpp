@@ -348,6 +348,17 @@ void Engine::create_render_pass() {
     rp_info.pDependencies = &dependency;
 
     render_pass_ = vk::raii::RenderPass(device_, rp_info);
+
+    // Overlay render pass — same attachments but loads color (no clear).
+    // Used to composite ImGui on top of blitted content.
+    color_attachment.loadOp = vk::AttachmentLoadOp::eLoad;
+    color_attachment.initialLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    depth_attachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+    depth_attachment.initialLayout = vk::ImageLayout::eUndefined;
+
+    std::array overlay_attachments = {color_attachment, depth_attachment};
+    rp_info.pAttachments = overlay_attachments.data();
+    overlay_pass_ = vk::raii::RenderPass(device_, rp_info);
 }
 
 void Engine::create_framebuffers() {
@@ -534,6 +545,24 @@ void Engine::begin_desktop_render_pass(vk::CommandBuffer cmd) {
     rp_begin.renderArea = vk::Rect2D{{0, 0}, swapchain_extent_};
     rp_begin.clearValueCount = static_cast<uint32_t>(clear_values.size());
     rp_begin.pClearValues = clear_values.data();
+
+    cmd.beginRenderPass(rp_begin, vk::SubpassContents::eInline);
+
+    vk::Viewport viewport{0, 0,
+        static_cast<float>(swapchain_extent_.width),
+        static_cast<float>(swapchain_extent_.height),
+        0.0f, 1.0f};
+    cmd.setViewport(0, viewport);
+
+    vk::Rect2D scissor{{0, 0}, swapchain_extent_};
+    cmd.setScissor(0, scissor);
+}
+
+void Engine::begin_desktop_overlay_pass(vk::CommandBuffer cmd) {
+    vk::RenderPassBeginInfo rp_begin{};
+    rp_begin.renderPass = *overlay_pass_;
+    rp_begin.framebuffer = *framebuffers_[image_index_];
+    rp_begin.renderArea = vk::Rect2D{{0, 0}, swapchain_extent_};
 
     cmd.beginRenderPass(rp_begin, vk::SubpassContents::eInline);
 
