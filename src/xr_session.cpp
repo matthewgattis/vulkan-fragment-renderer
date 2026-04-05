@@ -54,8 +54,11 @@ std::optional<XrVulkanRequirements> XrSession::query_requirements() {
     instance_ci.applicationInfo.engineVersion = 1;
     instance_ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
 
-    const char* extensions[] = {"XR_KHR_vulkan_enable"};
-    instance_ci.enabledExtensionCount = 1;
+    const char* extensions[] = {
+        "XR_KHR_vulkan_enable",
+        "XR_KHR_composition_layer_depth",
+    };
+    instance_ci.enabledExtensionCount = 2;
     instance_ci.enabledExtensionNames = extensions;
 
     XrResult result = xrCreateInstance(&instance_ci, &s_xr_instance_);
@@ -225,12 +228,12 @@ XrSession::~XrSession() {
     for (auto& eye : eyes_) {
         eye.framebuffers.clear();
         eye.color_views.clear();
-        eye.depth_view = vk::raii::ImageView{nullptr};
-        if (eye.depth_alloc) {
-            vmaDestroyImage(allocator_, eye.depth_image, eye.depth_alloc);
+        eye.depth_views.clear();
+        if (eye.depth_handle != XR_NULL_HANDLE) {
+            xrDestroySwapchain(eye.depth_handle);
         }
-        if (eye.handle != XR_NULL_HANDLE) {
-            xrDestroySwapchain(eye.handle);
+        if (eye.color_handle != XR_NULL_HANDLE) {
+            xrDestroySwapchain(eye.color_handle);
         }
     }
 
@@ -261,7 +264,7 @@ void XrSession::create_render_pass() {
     depth_attachment.format = depth_format_;
     depth_attachment.samples = vk::SampleCountFlagBits::e1;
     depth_attachment.loadOp = vk::AttachmentLoadOp::eClear;
-    depth_attachment.storeOp = vk::AttachmentStoreOp::eDontCare;
+    depth_attachment.storeOp = vk::AttachmentStoreOp::eStore;
     depth_attachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
     depth_attachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
     depth_attachment.initialLayout = vk::ImageLayout::eUndefined;
@@ -326,73 +329,88 @@ void XrSession::create_swapchains() {
 
     for (uint32_t eye = 0; eye < 2; ++eye) {
         // Create color swapchain
-        XrSwapchainCreateInfo swapchain_ci{};
-        swapchain_ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
-        swapchain_ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-        swapchain_ci.format = static_cast<int64_t>(color_format_);
-        swapchain_ci.sampleCount = 1;
-        swapchain_ci.width = eye_extent_.width;
-        swapchain_ci.height = eye_extent_.height;
-        swapchain_ci.faceCount = 1;
-        swapchain_ci.arraySize = 1;
-        swapchain_ci.mipCount = 1;
+        XrSwapchainCreateInfo color_ci{};
+        color_ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+        color_ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+        color_ci.format = static_cast<int64_t>(color_format_);
+        color_ci.sampleCount = 1;
+        color_ci.width = eye_extent_.width;
+        color_ci.height = eye_extent_.height;
+        color_ci.faceCount = 1;
+        color_ci.arraySize = 1;
+        color_ci.mipCount = 1;
 
-        XR_CHECK(xrCreateSwapchain(xr_session_, &swapchain_ci, &eyes_[eye].handle),
-                 "failed to create XR swapchain");
+        XR_CHECK(xrCreateSwapchain(xr_session_, &color_ci, &eyes_[eye].color_handle),
+                 "failed to create XR color swapchain");
 
-        // Enumerate swapchain images
-        uint32_t image_count = 0;
-        xrEnumerateSwapchainImages(eyes_[eye].handle, 0, &image_count, nullptr);
+        // Enumerate color swapchain images
+        uint32_t color_count = 0;
+        xrEnumerateSwapchainImages(eyes_[eye].color_handle, 0, &color_count, nullptr);
 
-        eyes_[eye].images.resize(image_count);
-        for (auto& img : eyes_[eye].images) {
+        eyes_[eye].color_images.resize(color_count);
+        for (auto& img : eyes_[eye].color_images) {
             img.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
             img.next = nullptr;
         }
-        xrEnumerateSwapchainImages(eyes_[eye].handle, image_count, &image_count,
+        xrEnumerateSwapchainImages(eyes_[eye].color_handle, color_count, &color_count,
                                    reinterpret_cast<XrSwapchainImageBaseHeader*>(
-                                       eyes_[eye].images.data()));
+                                       eyes_[eye].color_images.data()));
 
-        logger->info("eye {} swapchain: {} images", eye, image_count);
+        logger->info("eye {} color swapchain: {} images", eye, color_count);
 
-        // Create image views for each swapchain image
-        for (uint32_t i = 0; i < image_count; ++i) {
+        for (uint32_t i = 0; i < color_count; ++i) {
             vk::ImageViewCreateInfo view_ci{};
-            view_ci.image = eyes_[eye].images[i].image;
+            view_ci.image = eyes_[eye].color_images[i].image;
             view_ci.viewType = vk::ImageViewType::e2D;
             view_ci.format = color_format_;
             view_ci.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
             eyes_[eye].color_views.emplace_back(*raii_device_, view_ci);
         }
 
-        // Create depth buffer for this eye (one shared across swapchain images)
-        VkImageCreateInfo depth_ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        depth_ci.imageType = VK_IMAGE_TYPE_2D;
-        depth_ci.format = static_cast<VkFormat>(depth_format_);
-        depth_ci.extent = {eye_extent_.width, eye_extent_.height, 1};
-        depth_ci.mipLevels = 1;
-        depth_ci.arrayLayers = 1;
-        depth_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-        depth_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-        depth_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        // Create depth swapchain
+        XrSwapchainCreateInfo depth_ci{};
+        depth_ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+        depth_ci.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        depth_ci.format = static_cast<int64_t>(depth_format_);
+        depth_ci.sampleCount = 1;
+        depth_ci.width = eye_extent_.width;
+        depth_ci.height = eye_extent_.height;
+        depth_ci.faceCount = 1;
+        depth_ci.arraySize = 1;
+        depth_ci.mipCount = 1;
 
-        VmaAllocationCreateInfo alloc_ci{};
-        alloc_ci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        XR_CHECK(xrCreateSwapchain(xr_session_, &depth_ci, &eyes_[eye].depth_handle),
+                 "failed to create XR depth swapchain");
 
-        vmaCreateImage(allocator_, &depth_ci, &alloc_ci,
-                       &eyes_[eye].depth_image, &eyes_[eye].depth_alloc, nullptr);
+        uint32_t depth_count = 0;
+        xrEnumerateSwapchainImages(eyes_[eye].depth_handle, 0, &depth_count, nullptr);
 
-        vk::ImageViewCreateInfo dv_ci{};
-        dv_ci.image = eyes_[eye].depth_image;
-        dv_ci.viewType = vk::ImageViewType::e2D;
-        dv_ci.format = depth_format_;
-        dv_ci.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1};
-        eyes_[eye].depth_view = vk::raii::ImageView(*raii_device_, dv_ci);
+        eyes_[eye].depth_images.resize(depth_count);
+        for (auto& img : eyes_[eye].depth_images) {
+            img.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+            img.next = nullptr;
+        }
+        xrEnumerateSwapchainImages(eyes_[eye].depth_handle, depth_count, &depth_count,
+                                   reinterpret_cast<XrSwapchainImageBaseHeader*>(
+                                       eyes_[eye].depth_images.data()));
 
-        // Create framebuffers (one per swapchain image)
-        for (uint32_t i = 0; i < image_count; ++i) {
+        logger->info("eye {} depth swapchain: {} images", eye, depth_count);
+
+        for (uint32_t i = 0; i < depth_count; ++i) {
+            vk::ImageViewCreateInfo view_ci{};
+            view_ci.image = eyes_[eye].depth_images[i].image;
+            view_ci.viewType = vk::ImageViewType::e2D;
+            view_ci.format = depth_format_;
+            view_ci.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1};
+            eyes_[eye].depth_views.emplace_back(*raii_device_, view_ci);
+        }
+
+        // Create framebuffers (one per color/depth swapchain image pair)
+        // Color and depth swapchain image counts should match
+        for (uint32_t i = 0; i < color_count; ++i) {
             std::array<vk::ImageView, 2> attachments = {
-                *eyes_[eye].color_views[i], *eyes_[eye].depth_view};
+                *eyes_[eye].color_views[i],
+                *eyes_[eye].depth_views[i % depth_count]};
 
             vk::FramebufferCreateInfo fb_ci{};
             fb_ci.renderPass = *render_pass_;
@@ -482,7 +500,7 @@ std::array<XrEyeRenderInfo, 2> XrSession::locate_views(const glm::mat4& camera_w
         result[eye].pose = xr_views_[eye].pose;
         result[eye].fov = xr_views_[eye].fov;
         result[eye].view = xr_pose_to_view_matrix(xr_views_[eye].pose, camera_world);
-        result[eye].projection = xr_fov_to_projection(xr_views_[eye].fov, 0.01f, 1000.0f);
+        result[eye].projection = xr_fov_to_projection(xr_views_[eye].fov, NEAR_Z, FAR_Z);
     }
     return result;
 }
@@ -490,18 +508,27 @@ std::array<XrEyeRenderInfo, 2> XrSession::locate_views(const glm::mat4& camera_w
 void XrSession::begin_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
     auto& sc = eyes_[eye];
 
-    // Acquire swapchain image
+    // Acquire color swapchain image
     XrSwapchainImageAcquireInfo acquire_info{};
     acquire_info.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
-    XR_CHECK(xrAcquireSwapchainImage(sc.handle, &acquire_info, &sc.current_index),
-             "xrAcquireSwapchainImage failed");
+    XR_CHECK(xrAcquireSwapchainImage(sc.color_handle, &acquire_info, &sc.color_index),
+             "xrAcquireSwapchainImage (color) failed");
 
-    // Wait for runtime to release it
     XrSwapchainImageWaitInfo wait_info{};
     wait_info.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
     wait_info.timeout = XR_INFINITE_DURATION;
-    XR_CHECK(xrWaitSwapchainImage(sc.handle, &wait_info),
-             "xrWaitSwapchainImage failed");
+    XR_CHECK(xrWaitSwapchainImage(sc.color_handle, &wait_info),
+             "xrWaitSwapchainImage (color) failed");
+
+    // Acquire depth swapchain image
+    XR_CHECK(xrAcquireSwapchainImage(sc.depth_handle, &acquire_info, &sc.depth_index),
+             "xrAcquireSwapchainImage (depth) failed");
+    XR_CHECK(xrWaitSwapchainImage(sc.depth_handle, &wait_info),
+             "xrWaitSwapchainImage (depth) failed");
+
+    // Build framebuffer from current color + depth indices
+    // We pre-built framebuffers assuming matching indices; if they differ, rebuild on the fly
+    vk::raii::Framebuffer* fb = &sc.framebuffers[sc.color_index];
 
     // Begin render pass
     std::array<vk::ClearValue, 2> clear_values;
@@ -510,7 +537,7 @@ void XrSession::begin_eye_render(vk::CommandBuffer cmd, uint32_t eye) {
 
     vk::RenderPassBeginInfo rp_info{};
     rp_info.renderPass = *render_pass_;
-    rp_info.framebuffer = *sc.framebuffers[sc.current_index];
+    rp_info.framebuffer = **fb;
     rp_info.renderArea = vk::Rect2D{{0, 0}, eye_extent_};
     rp_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
     rp_info.pClearValues = clear_values.data();
@@ -540,13 +567,15 @@ void XrSession::end_eye_render_pass(vk::CommandBuffer cmd, uint32_t /*eye*/) {
 void XrSession::release_eye(uint32_t eye) {
     XrSwapchainImageReleaseInfo release_info{};
     release_info.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
-    XR_CHECK(xrReleaseSwapchainImage(eyes_[eye].handle, &release_info),
-             "xrReleaseSwapchainImage failed");
+    XR_CHECK(xrReleaseSwapchainImage(eyes_[eye].color_handle, &release_info),
+             "xrReleaseSwapchainImage (color) failed");
+    XR_CHECK(xrReleaseSwapchainImage(eyes_[eye].depth_handle, &release_info),
+             "xrReleaseSwapchainImage (depth) failed");
 }
 
 vk::Image XrSession::eye_color_image(uint32_t eye) const {
     auto& sc = eyes_[eye];
-    return vk::Image(sc.images[sc.current_index].image);
+    return vk::Image(sc.color_images[sc.color_index].image);
 }
 
 void XrSession::end_frame() {
@@ -560,11 +589,25 @@ void XrSession::end_frame() {
 
     if (frame_state_.shouldRender) {
         for (uint32_t eye = 0; eye < 2; ++eye) {
+            // Depth info — chained onto projection view
+            depth_infos_[eye].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+            depth_infos_[eye].next = nullptr;
+            depth_infos_[eye].subImage.swapchain = eyes_[eye].depth_handle;
+            depth_infos_[eye].subImage.imageRect.offset = {0, 0};
+            depth_infos_[eye].subImage.imageRect.extent = {
+                static_cast<int32_t>(eye_extent_.width),
+                static_cast<int32_t>(eye_extent_.height)};
+            depth_infos_[eye].subImage.imageArrayIndex = 0;
+            depth_infos_[eye].minDepth = 0.0f;
+            depth_infos_[eye].maxDepth = 1.0f;
+            depth_infos_[eye].nearZ = NEAR_Z;
+            depth_infos_[eye].farZ = FAR_Z;
+
             projection_views_[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-            projection_views_[eye].next = nullptr;
+            projection_views_[eye].next = &depth_infos_[eye];
             projection_views_[eye].pose = xr_views_[eye].pose;
             projection_views_[eye].fov = xr_views_[eye].fov;
-            projection_views_[eye].subImage.swapchain = eyes_[eye].handle;
+            projection_views_[eye].subImage.swapchain = eyes_[eye].color_handle;
             projection_views_[eye].subImage.imageRect.offset = {0, 0};
             projection_views_[eye].subImage.imageRect.extent = {
                 static_cast<int32_t>(eye_extent_.width),
