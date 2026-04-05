@@ -7,6 +7,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <SDL3/SDL.h>
+#include <imgui.h>
 #include <fstream>
 #include <sstream>
 #include <cstring>
@@ -220,6 +221,29 @@ void App::run() {
             fps_tick_ = now;
         }
 
+        // Keyboard movement (continuous, once per frame)
+        if (mouse_trapped_ || !ui_.wants_input()) {
+            const bool* keys = SDL_GetKeyboardState(nullptr);
+            glm::vec3 dir{0.0f};
+
+            if (keys[SDL_SCANCODE_W]) dir.y += 1.0f;
+            if (keys[SDL_SCANCODE_S]) dir.y -= 1.0f;
+            if (keys[SDL_SCANCODE_A]) dir.x -= 1.0f;
+            if (keys[SDL_SCANCODE_D]) dir.x += 1.0f;
+            if (keys[SDL_SCANCODE_SPACE])  dir.z += 1.0f;
+            if (keys[SDL_SCANCODE_LSHIFT]) dir.z -= 1.0f;
+
+            if (glm::length(dir) > 0.0f) {
+                dir = glm::normalize(dir);
+                if (hmd_active_) {
+                    glm::vec3 world_dir = hmd_right_ * dir.x + hmd_forward_ * dir.y + hmd_up_ * dir.z;
+                    camera_.set_move_direction_world(world_dir);
+                } else {
+                    camera_.set_move_direction(dir);
+                }
+            }
+        }
+
         camera_.update(dt);
 
         if (xr_mode_) {
@@ -250,85 +274,109 @@ void App::run_desktop_frame(float /*dt*/) {
     }
 
     ui_.begin_frame();
-    ui_.render(camera_, fps_);
+    ui_.render(camera_, fps_, mouse_trapped_);
     ui_.end_frame(cmd);
 
     engine_.end_frame();
 }
 
-void App::run_xr_frame(float /*dt*/) {
+void App::run_xr_frame(float dt) {
     xr_session_->poll_events();
 
-    if (!xr_session_->session_running()) return;
+    if (!xr_session_->session_running()) {
+        // Session not active (HMD disconnected, runtime stopped, etc.) — desktop only
+        hmd_active_ = false;
+        run_desktop_frame(dt);
+        return;
+    }
 
     bool should_render = xr_session_->wait_and_begin_frame();
 
-    if (should_render) {
-        auto views = xr_session_->locate_views(camera_.position());
+    if (!should_render) {
+        // HMD idle / not worn — render to desktop instead
+        hmd_active_ = false;
+        run_desktop_frame(dt);
+        xr_session_->end_frame();
+        return;
+    }
 
-        auto cmd = engine_.begin_command_buffer();
-        uint32_t fi = engine_.frame_index();
+    // --- HMD active: XR stereo rendering with desktop mirror ---
 
-        if (pipeline_) {
-            for (uint32_t eye = 0; eye < 2; ++eye) {
-                update_frame_ubo_xr(eye, fi, views[eye].view, views[eye].projection,
-                                    xr_session_->eye_extent());
+    auto views = xr_session_->locate_views(glm::inverse(camera_.view_matrix()));
 
-                xr_session_->begin_eye_render(cmd, eye);
+    // Store HMD world-space basis for next frame's input processing.
+    // Extract from left eye view matrix (both eyes share the same head orientation).
+    glm::mat4 hmd_world = glm::inverse(views[0].view);
+    hmd_right_   = glm::normalize(glm::vec3(hmd_world[0]));
+    hmd_up_      = glm::normalize(glm::vec3(hmd_world[1]));
+    hmd_forward_ = -glm::normalize(glm::vec3(hmd_world[2]));  // -Z is forward
+    hmd_active_ = true;
 
-                pipeline_->bind(cmd);
-                std::array<vk::DescriptorSet, 2> sets = {
-                    xr_eye_frame_sets_[eye][fi], xr_eye_ray_sets_[eye][fi]};
-                cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                       pipeline_->layout(), 0,
-                                       sets, nullptr);
-                glm::mat4 model{1.0f};
-                cmd.pushConstants(pipeline_->layout(),
-                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-                    0, sizeof(model), &model);
-                cmd.draw(3, 1, 0, 0);
+    auto cmd = engine_.begin_command_buffer();
+    uint32_t fi = engine_.frame_index();
 
-                if (eye == 0) {
-                    // Left eye: end render pass but hold the image for mirror blit
-                    xr_session_->end_eye_render_pass(cmd, eye);
-                } else {
-                    xr_session_->end_eye_render(cmd, eye);
-                }
-            }
-        } else {
-            // No pipeline — still need to acquire/release swapchain images
-            for (uint32_t eye = 0; eye < 2; ++eye) {
-                xr_session_->begin_eye_render(cmd, eye);
-                if (eye == 0) {
-                    xr_session_->end_eye_render_pass(cmd, eye);
-                } else {
-                    xr_session_->end_eye_render(cmd, eye);
-                }
+    if (pipeline_) {
+        for (uint32_t eye = 0; eye < 2; ++eye) {
+            update_frame_ubo_xr(eye, fi, views[eye].view, views[eye].projection,
+                                xr_session_->eye_extent());
+
+            xr_session_->begin_eye_render(cmd, eye);
+
+            pipeline_->bind(cmd);
+            std::array<vk::DescriptorSet, 2> sets = {
+                xr_eye_frame_sets_[eye][fi], xr_eye_ray_sets_[eye][fi]};
+            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                   pipeline_->layout(), 0,
+                                   sets, nullptr);
+            glm::mat4 model{1.0f};
+            cmd.pushConstants(pipeline_->layout(),
+                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                0, sizeof(model), &model);
+            cmd.draw(3, 1, 0, 0);
+
+            if (eye == 0) {
+                // Left eye: end render pass but hold the image for mirror blit
+                xr_session_->end_eye_render_pass(cmd, eye);
+            } else {
+                xr_session_->end_eye_render(cmd, eye);
             }
         }
-
-        // Mirror left eye to desktop window
-        blit_xr_mirror(cmd);
-
-        // Release left eye now that the blit is recorded
-        xr_session_->release_eye(0);
-
-        // Submit with desktop present (or XR-only if mirror failed)
-        if (mirror_acquired_) {
-            engine_.submit_and_present();
-            mirror_acquired_ = false;
-        } else {
-            engine_.submit_xr_only();
+    } else {
+        // No pipeline — still need to acquire/release swapchain images
+        for (uint32_t eye = 0; eye < 2; ++eye) {
+            xr_session_->begin_eye_render(cmd, eye);
+            if (eye == 0) {
+                xr_session_->end_eye_render_pass(cmd, eye);
+            } else {
+                xr_session_->end_eye_render(cmd, eye);
+            }
         }
+    }
+
+    // Mirror left eye to desktop window + overlay pass for ImGui
+    bool mirrored = blit_xr_mirror(cmd);
+    xr_session_->release_eye(0);
+
+    if (mirrored) {
+        // Overlay pass: composites ImGui on top of the blitted mirror image.
+        // The pass transitions the desktop image from COLOR_ATTACHMENT_OPTIMAL
+        // to PRESENT_SRC_KHR via its finalLayout.
+        engine_.begin_desktop_overlay_pass(cmd);
+        ui_.begin_frame();
+        ui_.render(camera_, fps_, mouse_trapped_);
+        ui_.end_frame(cmd);
+        engine_.end_render_pass(cmd);
+
+        engine_.submit_and_present();
+    } else {
+        engine_.submit_xr_only();
     }
 
     xr_session_->end_frame();
 }
 
-void App::blit_xr_mirror(vk::CommandBuffer cmd) {
-    mirror_acquired_ = false;
-    if (!engine_.acquire_desktop_image()) return;
-    mirror_acquired_ = true;
+bool App::blit_xr_mirror(vk::CommandBuffer cmd) {
+    if (!engine_.acquire_desktop_image()) return false;
 
     vk::Image src = xr_session_->eye_color_image(0);
     vk::Image dst = engine_.desktop_image();
@@ -403,20 +451,22 @@ void App::blit_xr_mirror(vk::CommandBuffer cmd) {
     src_back.srcAccessMask = vk::AccessFlagBits::eTransferRead;
     src_back.dstAccessMask = {};
 
-    // Transition dst: TRANSFER_DST → PRESENT_SRC_KHR
-    vk::ImageMemoryBarrier dst_to_present{};
-    dst_to_present.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-    dst_to_present.newLayout = vk::ImageLayout::ePresentSrcKHR;
-    dst_to_present.image = dst;
-    dst_to_present.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
-    dst_to_present.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-    dst_to_present.dstAccessMask = {};
+    // Transition dst: TRANSFER_DST → COLOR_ATTACHMENT_OPTIMAL (overlay pass handles → PRESENT_SRC)
+    vk::ImageMemoryBarrier dst_to_attach{};
+    dst_to_attach.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    dst_to_attach.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    dst_to_attach.image = dst;
+    dst_to_attach.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    dst_to_attach.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+    dst_to_attach.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 
-    std::array post_barriers = {src_back, dst_to_present};
+    std::array post_barriers = {src_back, dst_to_attach};
     cmd.pipelineBarrier(
         vk::PipelineStageFlagBits::eTransfer,
-        vk::PipelineStageFlagBits::eBottomOfPipe,
+        vk::PipelineStageFlagBits::eColorAttachmentOutput,
         {}, nullptr, nullptr, post_barriers);
+
+    return true;
 }
 
 void App::update_frame_ubo_xr(uint32_t eye, uint32_t frame_index,
@@ -443,7 +493,13 @@ void App::update_frame_ubo_xr(uint32_t eye, uint32_t frame_index,
 void App::process_events() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        ui_.process_event(event);
+        // Trap mouse on click in viewport — before ImGui sees the down event
+        if (!mouse_trapped_ && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+            && !ui_.wants_mouse() && pipeline_) {
+            trap_mouse();
+        }
+
+        if (!mouse_trapped_) ui_.process_event(event);
 
         switch (event.type) {
         case SDL_EVENT_QUIT:
@@ -451,11 +507,14 @@ void App::process_events() {
             break;
 
         case SDL_EVENT_KEY_DOWN:
-            if (ui_.wants_input()) break;
+            if (!mouse_trapped_ && ui_.wants_input()) break;
             switch (event.key.scancode) {
-            case SDL_SCANCODE_ESCAPE: running_ = false; break;
+            case SDL_SCANCODE_ESCAPE:
+                if (mouse_trapped_) { untrap_mouse(); }
+                else { running_ = false; }
+                break;
             case SDL_SCANCODE_R: reload_shader(); break;
-            case SDL_SCANCODE_Q: unload_shader(); break;
+            case SDL_SCANCODE_Q: unload_shader(); untrap_mouse(); break;
             case SDL_SCANCODE_T: time_ = 0.0f; break;
             case SDL_SCANCODE_C: camera_.reset(); break;
             case SDL_SCANCODE_G: ui_.toggle(); break;
@@ -468,7 +527,6 @@ void App::process_events() {
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (ui_.wants_input()) break;
             if (event.button.button == SDL_BUTTON_LEFT)   mouse_left_ = true;
             if (event.button.button == SDL_BUTTON_RIGHT)  mouse_right_ = true;
             if (event.button.button == SDL_BUTTON_MIDDLE) mouse_middle_ = true;
@@ -481,9 +539,14 @@ void App::process_events() {
             break;
 
         case SDL_EVENT_MOUSE_MOTION:
-            if (ui_.wants_input()) break;
+            if (!mouse_trapped_ && ui_.wants_input()) break;
             if (mouse_left_ && mouse_right_) {
-                camera_.on_scroll(-event.motion.yrel * 0.1f);
+                float zoom = -event.motion.yrel * 0.1f;
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                    camera_.adjust_pivot_distance(zoom, Camera::ZOOM_MOUSE_SPEED);
+                } else {
+                    camera_.on_scroll(zoom, Camera::ZOOM_MOUSE_SPEED);
+                }
             } else {
                 camera_.on_mouse_move(event.motion.xrel, event.motion.yrel,
                                       mouse_left_, mouse_right_, mouse_middle_);
@@ -491,8 +554,12 @@ void App::process_events() {
             break;
 
         case SDL_EVENT_MOUSE_WHEEL:
-            if (ui_.wants_input()) break;
-            camera_.on_scroll(event.wheel.y);
+            if (!mouse_trapped_ && ui_.wants_input()) break;
+            if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                camera_.adjust_pivot_distance(event.wheel.y, Camera::ZOOM_SCROLL_SPEED);
+            } else {
+                camera_.on_scroll(event.wheel.y, Camera::ZOOM_SCROLL_SPEED);
+            }
             break;
 
         case SDL_EVENT_WINDOW_RESIZED:
@@ -504,23 +571,6 @@ void App::process_events() {
         }
     }
 
-    // Keyboard movement (continuous)
-    if (!ui_.wants_input()) {
-        const bool* keys = SDL_GetKeyboardState(nullptr);
-        glm::vec3 dir{0.0f};
-        float dt = 1.0f / 60.0f;
-
-        if (keys[SDL_SCANCODE_W]) dir.y += 1.0f;
-        if (keys[SDL_SCANCODE_S]) dir.y -= 1.0f;
-        if (keys[SDL_SCANCODE_A]) dir.x -= 1.0f;
-        if (keys[SDL_SCANCODE_D]) dir.x += 1.0f;
-        if (keys[SDL_SCANCODE_SPACE])  dir.z += 1.0f;
-        if (keys[SDL_SCANCODE_LSHIFT]) dir.z -= 1.0f;
-
-        if (glm::length(dir) > 0.0f) {
-            camera_.on_key_move(glm::normalize(dir), dt);
-        }
-    }
 }
 
 void App::reload_shader() {
@@ -547,6 +597,20 @@ void App::reload_shader() {
     } catch (const std::exception& e) {
         LOG_ERROR("shader reload failed: {}", e.what());
     }
+}
+
+void App::trap_mouse() {
+    SDL_SetWindowRelativeMouseMode(window_.handle(), true);
+    mouse_trapped_ = true;
+    ImGui::SetWindowFocus(nullptr);
+}
+
+void App::untrap_mouse() {
+    SDL_SetWindowRelativeMouseMode(window_.handle(), false);
+    mouse_trapped_ = false;
+    mouse_left_ = false;
+    mouse_right_ = false;
+    mouse_middle_ = false;
 }
 
 void App::unload_shader() {

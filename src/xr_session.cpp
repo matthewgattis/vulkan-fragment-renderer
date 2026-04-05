@@ -464,7 +464,7 @@ bool XrSession::wait_and_begin_frame() {
     return frame_state_.shouldRender == XR_TRUE;
 }
 
-std::array<XrEyeRenderInfo, 2> XrSession::locate_views(const glm::vec3& body_position) {
+std::array<XrEyeRenderInfo, 2> XrSession::locate_views(const glm::mat4& camera_world) {
     XrViewLocateInfo locate_info{};
     locate_info.type = XR_TYPE_VIEW_LOCATE_INFO;
     locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -483,7 +483,7 @@ std::array<XrEyeRenderInfo, 2> XrSession::locate_views(const glm::vec3& body_pos
     for (uint32_t eye = 0; eye < 2; ++eye) {
         result[eye].pose = xr_views_[eye].pose;
         result[eye].fov = xr_views_[eye].fov;
-        result[eye].view = xr_pose_to_view_matrix(xr_views_[eye].pose, body_position);
+        result[eye].view = xr_pose_to_view_matrix(xr_views_[eye].pose, camera_world);
         result[eye].projection = xr_fov_to_projection(xr_views_[eye].fov, 0.01f, 1000.0f);
     }
     return result;
@@ -592,19 +592,18 @@ void XrSession::end_frame() {
 // ──────────────────────────────────────────────────────────────
 
 glm::mat4 XrSession::xr_pose_to_view_matrix(const XrPosef& pose,
-                                              const glm::vec3& body_position) {
+                                              const glm::mat4& camera_world) {
     // XR quaternion (xyzw) → glm quaternion (wxyz)
     glm::quat q(pose.orientation.w, pose.orientation.x,
                 pose.orientation.y, pose.orientation.z);
     glm::vec3 xr_pos(pose.position.x, pose.position.y, pose.position.z);
 
-    // Eye transform in XR local space
+    // Eye transform in XR local space (LOCAL reference space)
     glm::mat4 eye_local = glm::translate(glm::mat4(1.0f), xr_pos) * glm::mat4_cast(q);
 
-    // OpenXR and our engine both use right-handed Y-up: no coordinate conversion needed.
-    glm::mat4 eye_world = glm::translate(glm::mat4(1.0f), body_position) * eye_local;
+    // XR rig is a child of the camera: camera_world * eye_local
+    glm::mat4 eye_world = camera_world * eye_local;
 
-    // View matrix = inverse of eye world transform.
     return glm::inverse(eye_world);
 }
 
