@@ -122,7 +122,6 @@ void main() {
         pow(cheap_ao, 0.8),
         vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.3, 0.20, 0.20));
     color = mix(vec3(0.0), color, cheap_ao);
-    color = pow(clamp(color, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
 
     outColor = vec4(color, 1.0);
 

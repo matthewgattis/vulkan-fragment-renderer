@@ -9,7 +9,7 @@ namespace vfr {
 
 class Window {
 public:
-    Window(const std::string& title, int width, int height, bool high_dpi);
+    Window(const std::string& title, bool high_dpi);
     ~Window();
 
     Window(const Window&) = delete;
