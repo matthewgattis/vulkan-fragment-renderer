@@ -9,7 +9,7 @@ A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support.
 - **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. XR rig is a child of the camera (full transform). Left eye mirrored to desktop window via blit (aspect-preserving fill) with ImGui overlay. Falls back to desktop rendering when HMD is idle/not worn. WASD moves in HMD space when headset is active. Enabled by default when a headset is available; disable with `--no-xr`
 - **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
 - **Hot-reload** — press `R` to recompile and reload the shader from disk
-- **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry
+- **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry. In XR mode, depth is submitted to the runtime via `XR_KHR_composition_layer_depth` for reprojection (ASW/SpaceWarp)
 - **Quaternion camera** — gimbal-lock-free orbit and free-look modes with acceleration/friction physics, pivot-distance-scaled movement
 - **Mouse capture** — click viewport to capture, Escape to release. Camera controls require capture when UI is visible
 - **Dear ImGui overlay** — FPS, camera info, capture state, and controls reference (auto-resizing)
@@ -116,7 +116,7 @@ Managed via vcpkg (submoduled):
 - Vulkan 1.3
 - VMA (Vulkan Memory Allocator)
 - SDL3 (windowing, input)
-- OpenXR (HMD support via `XR_KHR_vulkan_enable`)
+- OpenXR (HMD support via `XR_KHR_vulkan_enable`, depth via `XR_KHR_composition_layer_depth`)
 - shaderc (runtime GLSL to SPIR-V)
 - Dear ImGui (debug UI)
 - GLM (math, with `GLM_FORCE_DEPTH_ZERO_TO_ONE`)

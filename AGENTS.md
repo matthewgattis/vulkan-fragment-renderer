@@ -13,13 +13,13 @@ cmake --preset default && cmake --build build
 ## Architecture
 
 - **Engine** (`engine.hpp/cpp`) — Vulkan instance, device, VMA allocator, swapchain, render pass, frame lifecycle (acquire/submit/present), deferred destruction, semaphore ring for sync. Accepts `ExternalVulkanRequirements` for XR extension/device negotiation.
-- **Window** (`window.hpp/cpp`) — SDL3 window, Vulkan surface, DPI, fullscreen.
+- **Window** (`window.hpp/cpp`) — SDL3 window, Vulkan surface, DPI, fullscreen. Auto-selects largest 4:3 resolution fitting the display's usable area.
 - **Pipeline** (`pipeline.hpp/cpp`) — Graphics pipeline builder. Accepts `span<DescriptorSetLayout>` for multi-set layouts, push constants (per-object model matrix). Depth test/write enabled.
 - **ShaderCompiler** (`shader_compiler.hpp/cpp`) — Runtime GLSL-to-SPIR-V via shaderc, SPIR-V file loader.
-- **Camera** (`camera.hpp/cpp`) — Quaternion-based orbit/free-look camera. No gimbal lock. View matrix built directly from quaternion (no `lookAt`).
-- **Ui** (`ui.hpp/cpp`) — Dear ImGui initialization and rendering within the main render pass.
-- **App** (`app.hpp/cpp`) — Main loop, event dispatch, frame UBO management, shader hot-reload. Branches to desktop or XR render path. Manages per-eye descriptor sets and UBO buffers for XR stereo rendering.
-- **XrSession** (`xr_session.hpp/cpp`) — OpenXR session lifecycle via `XR_KHR_vulkan_enable` (v1). Two-phase init: static `query_requirements()`/`query_physical_device()` before Vulkan device creation, constructor after. Manages XR instance, session, LOCAL reference space, per-eye swapchains, depth buffers, framebuffers, and frame submission. Provides per-eye view/projection matrices with asymmetric frustum support.
+- **Camera** (`camera.hpp/cpp`) — Quaternion-based orbit/free-look camera. No gimbal lock. View matrix built directly from quaternion (no `lookAt`). Acceleration/friction physics with pivot-distance-scaled movement. Caller sets move direction per frame; `update(dt)` applies forces.
+- **Ui** (`ui.hpp/cpp`) — Dear ImGui initialization and rendering within the main render pass. Auto-resize window. `wants_input()`/`wants_mouse()` for input routing. Events not forwarded to ImGui while mouse is trapped.
+- **App** (`app.hpp/cpp`) — Main loop, event dispatch, frame UBO management, shader hot-reload. Branches to desktop or XR render path. Manages per-eye descriptor sets and UBO buffers for XR stereo rendering. Mouse capture system (click to trap, Escape to release). Keyboard movement runs once per frame via `SDL_GetKeyboardState`, decoupled from event loop. WASD in HMD space when headset active.
+- **XrSession** (`xr_session.hpp/cpp`) — OpenXR session lifecycle via `XR_KHR_vulkan_enable` (v1). Two-phase init: static `query_requirements()`/`query_physical_device()` before Vulkan device creation, constructor after. Manages XR instance, session, LOCAL reference space, per-eye color and depth swapchains, framebuffers (pre-built for all color×depth index combinations), and frame submission. Submits depth to runtime via `XR_KHR_composition_layer_depth` for reprojection. XR rig is a child of the camera (full transform). Provides per-eye view/projection matrices with asymmetric frustum support.
 
 ## Conventions
 
@@ -42,12 +42,13 @@ cmake --preset default && cmake --build build
 
 ### XR path
 1. `poll_events()` — XR session state machine.
-2. `wait_and_begin_frame()` — synchronize with runtime.
-3. Left eye: update UBOs, `begin_eye_render()`, bind/draw, `end_eye_render_pass()` (render pass only — image held for mirror).
-4. Right eye: update UBOs, `begin_eye_render()`, bind/draw, `end_eye_render()` (full release).
-5. `blit_xr_mirror()` — acquire desktop swapchain image, blit left eye with aspect-preserving fill crop, release left eye XR image.
-6. `submit_and_present()` — submit command buffer + present desktop mirror. Falls back to `submit_xr_only()` if window unavailable.
-7. `end_frame()` — submit composition layers to runtime.
+2. `wait_and_begin_frame()` — synchronize with runtime. If `shouldRender` is false (HMD idle/not worn), falls back to desktop path.
+3. Per eye: update UBOs, `begin_eye_render()` (acquires both color and depth swapchain images), bind/draw, end render pass. Left eye image held for mirror blit.
+4. `blit_xr_mirror()` — acquire desktop swapchain image, blit left eye with aspect-preserving fill crop.
+5. Desktop overlay pass (loadOp=eLoad) — composites ImGui on top of mirror.
+6. Release left eye (both color and depth swapchains).
+7. `submit_and_present()` — submit command buffer + present desktop mirror. Falls back to `submit_xr_only()` if window unavailable.
+8. `end_frame()` — submit composition layers with depth info (`XrCompositionLayerDepthInfoKHR`) to runtime for reprojection.
 
 ### Descriptor sets
 - **Set 0** (binding 0, `FrameUbo`): `mat4 view`, `mat4 projection`, `vec4 resolution`, `float time` — common to all shaders.
@@ -81,4 +82,5 @@ Fragment shaders must use `#version 450` and declare:
 - **Right-handed Y-up world space** — matches GLM and OpenXR conventions. `GLM_FORCE_DEPTH_ZERO_TO_ONE` for Vulkan [0,1] depth range.
 - **Vulkan Y-flip** — handled in projection matrix (`proj[1][1] *= -1`). Fragment shaders go through `inverse(Projection)` which naturally undoes the flip.
 - **Two descriptor sets** — set 0 for common frame data (usable by future rasterized geometry), set 1 for ray-marching-specific inverse matrices.
-- **OpenXR v1 API** (`XR_KHR_vulkan_enable`) — two-phase init to satisfy Vulkan/XR device negotiation. Seated/LOCAL reference space. Per-eye asymmetric frustum via `glm::frustum`.
+- **OpenXR v1 API** (`XR_KHR_vulkan_enable`, `XR_KHR_composition_layer_depth`) — two-phase init to satisfy Vulkan/XR device negotiation. Seated/LOCAL reference space. Per-eye asymmetric frustum via `glm::frustum`. Depth submitted for runtime reprojection.
+- **sRGB swapchain** — hardware gamma correction. Shaders output linear color; no manual `pow(color, 1/2.2)`.
