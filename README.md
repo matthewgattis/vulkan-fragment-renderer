@@ -2,6 +2,8 @@
 
 A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support. Load any fragment shader and explore it interactively with an orbit/free-look camera, or in VR with full 6DoF head tracking.
 
+![Mandelbox detail](docs/screenshot.png)
+
 ## Features
 
 - **Vulkan rendering** with VMA for memory management, sRGB swapchain (hardware gamma correction)
