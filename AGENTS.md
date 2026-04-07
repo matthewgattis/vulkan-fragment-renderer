@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Vulkan-based real-time fragment shader viewer. Single executable, flat namespace (`vfr::`), no multi-layer engine architecture. Designed for simplicity with room to grow into a render engine.
+Vulkan-based real-time fragment shader viewer with OpenXR HMD support. Port of [shader-viewer-4](https://github.com/matthewgattis/shader-viewer-4) (OpenGL). Single executable, flat namespace (`vfr::`), no multi-layer engine architecture. May eventually adopt the steel/glass engine layers from [vulkan-voxel-project](https://github.com/matthewgattis/vulkan-voxel-project).
 
 ## Build
 

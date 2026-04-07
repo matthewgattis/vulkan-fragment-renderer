@@ -2,21 +2,19 @@
 
 A real-time GLSL fragment shader viewer built on Vulkan with OpenXR HMD support. Load any fragment shader and explore it interactively with an orbit/free-look camera, or in VR with full 6DoF head tracking.
 
+This is a port of [shader-viewer-4](https://github.com/matthewgattis/shader-viewer-4), an earlier OpenGL-based viewer. This version replaces OpenGL with the Vulkan API, adds OpenXR HMD support, and uses a descriptor set architecture for extensibility.
+
 ![Mandelbox detail](docs/screenshot.png)
 
 ## Features
 
-- **Vulkan rendering** with VMA for memory management, sRGB swapchain (hardware gamma correction)
-- **Automatic window sizing** — selects the largest 4:3 resolution that fits the display's usable area
-- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, seated/LOCAL reference space, 6DoF head tracking. XR rig is a child of the camera (full transform). Left eye mirrored to desktop window via blit (aspect-preserving fill) with ImGui overlay. Falls back to desktop rendering when HMD is idle/not worn. WASD moves in HMD space when headset is active. Enabled by default when a headset is available; disable with `--no-xr`
-- **Runtime GLSL compilation** via shaderc — no offline shader compilation step for user shaders
-- **Hot-reload** — press `R` to recompile and reload the shader from disk
-- **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling future compositing with geometry. In XR mode, depth is submitted to the runtime via `XR_KHR_composition_layer_depth` for reprojection (ASW/SpaceWarp)
-- **Quaternion camera** — gimbal-lock-free orbit and free-look modes with acceleration/friction physics, pivot-distance-scaled movement
-- **Mouse capture** — click viewport to capture, Escape to release. Camera controls require capture when UI is visible
-- **Dear ImGui overlay** — FPS, camera info, capture state, and controls reference (auto-resizing)
-- **Two-set descriptor layout** — set 0 (common frame data) for all shaders, set 1 (precomputed inverse matrices) for ray marching
-- **Push constants** — reserved for per-object model matrix (identity for fullscreen shaders)
+- **OpenXR HMD support** — stereo rendering with per-eye asymmetric frustums, 6DoF head tracking, and desktop mirror. Two-phase initialization so Vulkan can satisfy OpenXR extension requirements. Falls back gracefully to desktop-only when no HMD is detected
+- **Vulkan rendering** — VMA for memory management, sRGB swapchain, per-swapchain-image semaphore synchronization, deferred GPU resource destruction
+- **Depth buffer writes** — fragment shaders write `gl_FragDepth` via projection matrix, enabling compositing with geometry. In XR mode, depth is submitted to the runtime for reprojection (ASW/SpaceWarp)
+- **Descriptor set architecture** — set 0 (view, projection, resolution, time) for all shaders, set 1 (precomputed inverse matrices) for ray marching. Push constants reserved for per-object model matrices
+- **Runtime GLSL compilation** via shaderc with hot-reload — edit shaders and press `R` to recompile without restarting
+- **Quaternion camera** — gimbal-lock-free orbit and free-look with velocity physics, friction, and pivot-distance-scaled movement
+- **Dear ImGui overlay** — FPS, camera state, and controls reference
 
 ## Building
 
@@ -111,6 +109,19 @@ gl_FragDepth = clip.z / clip.w;
 
 See `example.glsl`, `kaleidoscopic-ifs.glsl`, and `mandelbox.glsl` for complete examples.
 
+## Architecture
+
+| Component | Description |
+|---|---|
+| `engine` | Vulkan instance, device, swapchain, render passes, depth buffer, command pool, and frame synchronization. Uses VMA for memory allocation and per-swapchain-image semaphore rings for acquisition. Manages deferred GPU resource destruction. Provides decomposed frame methods (`begin_command_buffer`, `acquire_desktop_image`, `begin_desktop_render_pass`, etc.) for XR dual-path rendering. Handles swapchain recreation with `oldSwapchain` for MoltenVK compatibility. |
+| `xr_session` | OpenXR HMD lifecycle via `XR_KHR_vulkan_enable`. Two-phase initialization: static `query_requirements()` runs before Vulkan setup to collect required extensions; the constructor runs after to create the XR session, per-eye swapchains, depth buffers, and render pass. Handles session state machine, frame timing, and coordinate transforms (XR pose to view matrix, asymmetric frustum projection with Vulkan Y-flip). Falls back gracefully when no HMD is detected. |
+| `app` | Main loop, event dispatch, shader loading/hot-reload, and frame UBO management. Owns two descriptor sets: set 0 (frame data: view, projection, resolution, time) and set 1 (precomputed inverse matrices for ray marching). Dual render path: XR stereo with desktop mirror blit, or desktop-only. Mouse capture/release for camera control. |
+| `pipeline` | Graphics pipeline creation with dynamic viewport/scissor. Accepts SPIR-V for vertex and fragment stages, descriptor set layouts, and push constant configuration. |
+| `shader_compiler` | Runtime GLSL-to-SPIR-V compilation via shaderc. Enables hot-reload without an offline compilation step. |
+| `camera` | Quaternion-based orbit/free-look camera with no gimbal lock. Velocity physics with friction, pivot-distance-scaled movement speed. View matrix built directly from quaternion conjugate. |
+| `window` | SDL3 window management with Vulkan surface creation, high-DPI support, and automatic 4:3 resolution selection. |
+| `ui` | Dear ImGui overlay with FPS, camera state, and controls reference. |
+
 ## Dependencies
 
 Managed via vcpkg (submoduled):
@@ -124,3 +135,7 @@ Managed via vcpkg (submoduled):
 - GLM (math, with `GLM_FORCE_DEPTH_ZERO_TO_ONE`)
 - spdlog (logging)
 - argparse (CLI)
+
+## License
+
+[MIT](LICENSE)
