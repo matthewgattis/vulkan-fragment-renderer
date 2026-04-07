@@ -74,14 +74,18 @@ private:
 
     // Per-eye swapchain
     struct EyeSwapchain {
-        XrSwapchain handle = XR_NULL_HANDLE;
-        std::vector<XrSwapchainImageVulkanKHR> images;
+        XrSwapchain color_handle = XR_NULL_HANDLE;
+        std::vector<XrSwapchainImageVulkanKHR> color_images;
         std::vector<vk::raii::ImageView> color_views;
-        VkImage depth_image = VK_NULL_HANDLE;
-        VmaAllocation depth_alloc = VK_NULL_HANDLE;
-        vk::raii::ImageView depth_view{nullptr};
-        std::vector<vk::raii::Framebuffer> framebuffers;
-        uint32_t current_index = 0;
+        uint32_t color_index = 0;
+
+        XrSwapchain depth_handle = XR_NULL_HANDLE;
+        std::vector<XrSwapchainImageVulkanKHR> depth_images;
+        std::vector<vk::raii::ImageView> depth_views;
+        uint32_t depth_index = 0;
+
+        std::vector<vk::raii::Framebuffer> framebuffers;  // color_count * depth_count
+        uint32_t depth_count = 0;
     };
     std::array<EyeSwapchain, 2> eyes_;
     vk::Extent2D eye_extent_{};
@@ -93,6 +97,10 @@ private:
     ::XrFrameState frame_state_{};
     std::array<XrView, 2> xr_views_;
     std::array<XrCompositionLayerProjectionView, 2> projection_views_;
+    std::array<XrCompositionLayerDepthInfoKHR, 2> depth_infos_{};
+
+    static constexpr float NEAR_Z = 0.01f;
+    static constexpr float FAR_Z = 1000.0f;
 
     // Vulkan handles (non-owning)
     VkDevice vk_device_ = VK_NULL_HANDLE;
