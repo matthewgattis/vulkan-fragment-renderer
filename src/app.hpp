@@ -63,7 +63,7 @@ private:
 
     std::filesystem::path shader_path_;
     std::unique_ptr<Pipeline> pipeline_;
-    std::vector<uint32_t> vert_spirv_;
+    // Fullscreen vertex SPIR-V is embedded via generated header (fullscreen_vert_spv.h).
 
     // UBO resources
     struct MappedBuffer {

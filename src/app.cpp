@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "shader_compiler.hpp"
+#include "fullscreen_vert_spv.h"
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -53,9 +54,6 @@ App::App(const std::filesystem::path& shader_path, bool high_dpi, bool xr_enable
     }
 
     create_frame_descriptors();
-
-    vert_spirv_ = ShaderCompiler::load_spirv(
-        std::filesystem::path{SHADER_DIR} / "fullscreen.vert.spv");
 
     reload_shader();
 
@@ -624,7 +622,8 @@ void App::build_pipeline(const std::vector<uint32_t>& frag_spirv) {
     std::array<vk::DescriptorSetLayout, 2> layouts = {*frame_layout_, *ray_layout_};
     pipeline_ = std::make_unique<Pipeline>(
         engine_.device(), engine_.render_pass(),
-        vert_spirv_, frag_spirv,
+        std::vector<uint32_t>(std::begin(fullscreen_vert_spv), std::end(fullscreen_vert_spv)),
+        frag_spirv,
         layouts);
 }
 

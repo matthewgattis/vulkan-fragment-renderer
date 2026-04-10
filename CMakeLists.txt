@@ -17,30 +17,37 @@ find_package(unofficial-shaderc CONFIG REQUIRED)
 find_package(argparse CONFIG REQUIRED)
 find_package(OpenXR CONFIG REQUIRED)
 
-# Compile fullscreen vertex shader to SPIR-V at build time
+# Compile fullscreen vertex shader to SPIR-V, then embed as a C++ header
 find_program(GLSLC glslc REQUIRED)
 
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+set(GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+file(MAKE_DIRECTORY ${GENERATED_INCLUDE_DIR})
 
-set(STATIC_SHADERS
-    ${SHADER_SOURCE_DIR}/fullscreen.vert
+set(FULLSCREEN_VERT_SPV ${SHADER_OUTPUT_DIR}/fullscreen.vert.spv)
+set(FULLSCREEN_VERT_HDR ${GENERATED_INCLUDE_DIR}/fullscreen_vert_spv.h)
+
+add_custom_command(
+    OUTPUT ${FULLSCREEN_VERT_SPV}
+    COMMAND ${GLSLC} ${SHADER_SOURCE_DIR}/fullscreen.vert -o ${FULLSCREEN_VERT_SPV}
+    DEPENDS ${SHADER_SOURCE_DIR}/fullscreen.vert
+    COMMENT "Compiling fullscreen.vert to SPIR-V"
 )
 
-foreach(SHADER ${STATIC_SHADERS})
-    get_filename_component(SHADER_NAME ${SHADER} NAME)
-    set(SHADER_OUTPUT ${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv)
-    add_custom_command(
-        OUTPUT ${SHADER_OUTPUT}
-        COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT}
-        DEPENDS ${SHADER}
-        COMMENT "Compiling ${SHADER_NAME} to SPIR-V"
-    )
-    list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
-endforeach()
+add_custom_command(
+    OUTPUT ${FULLSCREEN_VERT_HDR}
+    COMMAND ${CMAKE_COMMAND}
+        -DSPIRV_FILE=${FULLSCREEN_VERT_SPV}
+        -DHEADER_FILE=${FULLSCREEN_VERT_HDR}
+        -DARRAY_NAME=fullscreen_vert_spv
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spirv_to_header.cmake
+    DEPENDS ${FULLSCREEN_VERT_SPV}
+    COMMENT "Generating fullscreen_vert_spv.h"
+)
 
-add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
+add_custom_target(shaders DEPENDS ${FULLSCREEN_VERT_HDR})
 
 add_executable(vulkan-fragment-renderer
     src/main.cpp
@@ -57,10 +64,12 @@ add_executable(vulkan-fragment-renderer
 
 add_dependencies(vulkan-fragment-renderer shaders)
 
-target_include_directories(vulkan-fragment-renderer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(vulkan-fragment-renderer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${GENERATED_INCLUDE_DIR}
+)
 
 target_compile_definitions(vulkan-fragment-renderer PRIVATE
-    SHADER_DIR="${SHADER_OUTPUT_DIR}"
     XR_USE_GRAPHICS_API_VULKAN
     GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
